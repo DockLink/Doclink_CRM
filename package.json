@@ -1,0 +1,15 @@
+{
+  "devDependencies": {
+    "@types/node": "^22.20.3",
+    "@types/pg": "^8.23.1",
+    "prisma": "^7.10.0",
+    "tsx": "^4.23.13"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "^7.10.0",
+    "@prisma/client": "7.10.0",
+    "bcryptjs": "^3.0.3",
+    "dotenv": "^17.4.2",
+    "pg": "^8.23.0"
+  }
+}

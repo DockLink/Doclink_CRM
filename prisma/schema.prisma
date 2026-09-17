@@ -1,0 +1,187 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────
+
+enum Role {
+  superadmin
+  admin
+}
+
+enum Priority {
+  hot
+  warm
+  model User {
+    id        String   @id @db.Uuid
+    name      String
+    email     String   @unique
+    role      Role     @default(admin)
+    isActive  Boolean  @default(true) @map("is_active")
+    createdAt DateTime @default(now()) @map("created_at")
+  
+    assignedLeads Lead[] @relation("AssignedLeads")
+    createdLeads  Lead[] @relation("CreatedLeads")
+    loggedCalls   Activity[]
+  
+    @@map("users")
+  }  cold
+  
+}
+
+enum CustomFieldType {
+  TEXT
+  NUMBER
+  DATE
+  DROPDOWN
+  TOGGLE
+  URL
+}
+
+// ─────────────────────────────────────────────
+// Users  (SRS Section 4, 14)
+// ─────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  name         String
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  role         Role     @default(admin)
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  assignedLeads Lead[]     @relation("AssignedLeads")
+  createdLeads  Lead[]     @relation("CreatedLeads")
+  loggedCalls   Activity[]
+
+  @@map("users")
+}
+
+// ─────────────────────────────────────────────
+// Pipeline Stages  (SRS Section 5, 12.2, 14)
+// ─────────────────────────────────────────────
+
+model PipelineStage {
+  id        String  @id @default(uuid()) @db.Uuid
+  name      String
+  color     String
+  position  Int
+  isActive  Boolean @default(true) @map("is_active")
+  isDefault Boolean @default(false) @map("is_default")
+
+  leads Lead[]
+
+  @@map("pipeline_stages")
+}
+
+// ─────────────────────────────────────────────
+// Lead Sources  (SRS Section 12.3 — referenced by leads.source FK in Section 14,
+// but not modeled as its own table there; added here so it's a real relation.)
+// ─────────────────────────────────────────────
+
+model LeadSource {
+  id   String @id @default(uuid()) @db.Uuid
+  name String @unique
+
+  leads Lead[]
+
+  @@map("lead_sources")
+}
+
+// ─────────────────────────────────────────────
+// Leads  (SRS Section 6.1, 14)
+// ─────────────────────────────────────────────
+
+model Lead {
+  id               String    @id @default(uuid()) @db.Uuid
+  company          String
+  niche            String?
+  contact          String?
+  phone            String?
+  followUpDate     DateTime? @map("follow_up_date") @db.Date
+  followUpTime     DateTime? @map("follow_up_time") @db.Time
+  sourceId         String?   @map("source_id") @db.Uuid
+  priority         Priority?
+  stageId          String    @map("stage_id") @db.Uuid
+  assigneeId       String    @map("assignee_id") @db.Uuid
+  proposalSent     Boolean   @default(false) @map("proposal_sent")
+  proposalSentDate DateTime? @map("proposal_sent_date")
+  lostReason       String?   @map("lost_reason") // required in app logic when stage = Closed Lost (FR per Section 5)
+  notes            String?
+  stageChangedAt   DateTime? @map("stage_changed_at")
+  lastActivityAt   DateTime? @map("last_activity_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  createdBy        String?   @map("created_by") @db.Uuid
+
+  stage             PipelineStage          @relation(fields: [stageId], references: [id])
+  assignee          User                   @relation("AssignedLeads", fields: [assigneeId], references: [id])
+  creator           User?                  @relation("CreatedLeads", fields: [createdBy], references: [id])
+  source            LeadSource?            @relation(fields: [sourceId], references: [id])
+  activities        Activity[]
+  customFieldValues LeadCustomFieldValue[]
+
+  @@map("leads")
+}
+
+// ─────────────────────────────────────────────
+// Activities / Call Logs  (SRS Section 9, 14)
+// Immutable once saved per NFR Section 15.3 — enforce at the application layer
+// (no update/delete exposed for this model in your API).
+// ─────────────────────────────────────────────
+
+model Activity {
+  id        String   @id @default(uuid()) @db.Uuid
+  leadId    String   @map("lead_id") @db.Uuid
+  outcome   String
+  notes     String?
+  loggedBy  String   @map("logged_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+
+  lead   Lead @relation(fields: [leadId], references: [id])
+  logger User @relation(fields: [loggedBy], references: [id])
+
+  @@map("activities")
+}
+
+// ─────────────────────────────────────────────
+// Custom Fields  (SRS Section 6.2, 12.4 — FR-060 to FR-064)
+// ─────────────────────────────────────────────
+
+model CustomField {
+  id       String          @id @default(uuid()) @db.Uuid
+  label    String
+  type     CustomFieldType
+  options  Json? // only used when type = DROPDOWN
+  required Boolean         @default(false)
+  isActive Boolean         @default(true) @map("is_active")
+
+  values LeadCustomFieldValue[]
+
+  @@map("custom_fields")
+}
+
+model LeadCustomFieldValue {
+  id            String  @id @default(uuid()) @db.Uuid
+  leadId        String  @map("lead_id") @db.Uuid
+  customFieldId String  @map("custom_field_id") @db.Uuid
+  value         String?
+
+  lead        Lead        @relation(fields: [leadId], references: [id])
+  customField CustomField @relation(fields: [customFieldId], references: [id])
+
+  @@unique([leadId, customFieldId])
+  @@map("lead_custom_field_values")
+}
