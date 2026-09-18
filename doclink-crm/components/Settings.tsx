@@ -219,7 +219,7 @@ function AddUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
     <Modal title="Add New User" onClose={onClose} footer={
       <>
         <SecondaryBtn onClick={onClose}>Cancel</SecondaryBtn>
-        <PrimaryBtn onClick={() => void createUser}>{saving ? "Creating..." : "Create User"}</PrimaryBtn>
+        <PrimaryBtn onClick={() => void createUser()}>{saving ? "Creating..." : "Create User"}</PrimaryBtn>
       </>
     }>
       <FormField label="Full Name" required><TextInput value={name} onChange={setName} placeholder="e.g. Sarah Blake" /></FormField>
