@@ -44,85 +44,103 @@ export async function POST(request: Request) {
       .map((mapping) => [mapping.targetField, mapping.sourceHeader]),
   );
   const assigneeName = text(body.assigneeName);
-  const assignee = assigneeName
-    ? await prisma.user.findFirst({ where: { name: assigneeName, isActive: true } })
-    : profile;
+  const users = await prisma.user.findMany({ where: { isActive: true } });
+  const usersByName = new Map(users.map((user) => [user.name.toLowerCase(), user]));
+  const assignee = assigneeName ? usersByName.get(assigneeName.toLowerCase()) : profile;
   if (!assignee) return NextResponse.json({ error: "Selected assignee was not found" }, { status: 400 });
 
-  const defaultStage = await prisma.pipelineStage.findFirst({
-    where: { isActive: true, isDefault: true },
-    orderBy: { position: "asc" },
-  }) ?? await prisma.pipelineStage.findFirst({ where: { isActive: true }, orderBy: { position: "asc" } });
+  const stages = await prisma.pipelineStage.findMany({ where: { isActive: true }, orderBy: { position: "asc" } });
+  const stagesByName = new Map(stages.map((stage) => [stage.name.toLowerCase(), stage]));
+  const defaultStage = stages.find((stage) => stage.isDefault) ?? stages[0];
   if (!defaultStage) return NextResponse.json({ error: "No active pipeline stage is configured" }, { status: 400 });
 
   const assigneeHeader = mappings.get("Assignee");
   const stageHeader = mappings.get("Stage");
+  const companyHeader = mappings.get("Company");
+  const phoneHeader = mappings.get("Phone");
+  const sourceHeader = mappings.get("Source");
+  const sourceNames = [...new Set(body.rows.map((row) => text(sourceHeader ? row[sourceHeader] : "" )).filter(Boolean))];
+  const sources = await prisma.leadSource.findMany({ where: { name: { in: sourceNames } } });
+  const sourcesByName = new Map(sources.map((source) => [source.name.toLowerCase(), source]));
+  for (const sourceName of sourceNames) {
+    if (!sourcesByName.has(sourceName.toLowerCase())) {
+      const source = await prisma.leadSource.create({ data: { name: sourceName } });
+      sourcesByName.set(source.name.toLowerCase(), source);
+    }
+  }
+
+  const phones = [...new Set(body.rows.map((row) => text(phoneHeader ? row[phoneHeader] : "")).filter(Boolean))];
+  const existingLeads = phones.length > 0
+    ? await prisma.lead.findMany({ where: { phone: { in: phones } }, select: { company: true, phone: true } })
+    : [];
+  const existingKeys = new Set(existingLeads.map((lead) => `${lead.company.toLowerCase()}|${lead.phone ?? ""}`));
 
   const failedRows: Array<{ row: number; error: string }> = [];
-  let imported = 0;
   let skipped = 0;
+  const leadData: Array<{
+    company: string;
+    contact?: string;
+    phone?: string;
+    niche?: string;
+    notes?: string;
+    priority?: "hot" | "warm" | "cold";
+    followUpDate?: Date;
+    sourceId?: string;
+    stageId: string;
+    assigneeId: string;
+    createdBy: string;
+  }> = [];
 
-  await prisma.$transaction(async (transaction) => {
-    for (const [index, row] of body.rows!.entries()) {
-      const company = text(row[mappings.get("Company") ?? ""]);
-      const phone = text(row[mappings.get("Phone") ?? ""]);
-      if (!company) {
-        failedRows.push({ row: index + 2, error: "Company is required" });
-        continue;
-      }
-
-      const rowAssigneeName = text(assigneeHeader ? row[assigneeHeader] : "") || assignee?.name;
-      const rowAssignee = rowAssigneeName === assignee?.name
-        ? assignee
-        : await transaction.user.findFirst({ where: { name: rowAssigneeName, isActive: true } });
-      if (!rowAssignee) {
-        failedRows.push({ row: index + 2, error: `Assignee not found: ${rowAssigneeName}` });
-        continue;
-      }
-
-      const rowStageName = text(stageHeader ? row[stageHeader] : "");
-      const rowStage = rowStageName
-        ? await transaction.pipelineStage.findFirst({ where: { name: rowStageName, isActive: true } })
-        : defaultStage;
-      if (!rowStage) {
-        failedRows.push({ row: index + 2, error: `Stage not found: ${rowStageName}` });
-        continue;
-      }
-
-      const duplicate = phone
-        ? await transaction.lead.findFirst({ where: { company, phone }, select: { id: true } })
-        : null;
-      if (duplicate && body.duplicateAction !== "import") {
-        skipped += 1;
-        continue;
-      }
-
-      const sourceName = text(row[mappings.get("Source") ?? ""]);
-      const source = sourceName
-        ? await transaction.leadSource.upsert({ where: { name: sourceName }, update: {}, create: { name: sourceName } })
-        : null;
-      const rawPriority = text(row[mappings.get("Priority") ?? ""]).toLowerCase();
-      const priority = priorityValues.has(rawPriority) ? rawPriority as "hot" | "warm" | "cold" : undefined;
-      const followUpDate = dateValue(text(row[mappings.get("Follow-up Date") ?? ""]));
-
-      await transaction.lead.create({
-        data: {
-          company,
-          contact: text(row[mappings.get("Contact Name") ?? ""]) || undefined,
-          phone: phone || undefined,
-          niche: text(row[mappings.get("Niche") ?? ""]) || undefined,
-          notes: text(row[mappings.get("Notes") ?? ""]) || undefined,
-          priority,
-          followUpDate,
-          sourceId: source?.id,
-          stageId: rowStage.id,
-          assigneeId: rowAssignee.id,
-          createdBy: profile.id,
-        },
-      });
-      imported += 1;
+  for (const [index, row] of body.rows.entries()) {
+    const company = text(companyHeader ? row[companyHeader] : "");
+    const phone = text(phoneHeader ? row[phoneHeader] : "");
+    if (!company) {
+      failedRows.push({ row: index + 2, error: "Company is required" });
+      continue;
     }
-  });
 
-  return NextResponse.json({ imported, skipped, failedRows });
+    const rowAssigneeName = text(assigneeHeader ? row[assigneeHeader] : "") || assignee.name;
+    const rowAssignee = usersByName.get(rowAssigneeName.toLowerCase());
+    if (!rowAssignee) {
+      failedRows.push({ row: index + 2, error: `Assignee not found: ${rowAssigneeName}` });
+      continue;
+    }
+
+    const rowStageName = text(stageHeader ? row[stageHeader] : "");
+    const rowStage = rowStageName ? stagesByName.get(rowStageName.toLowerCase()) : defaultStage;
+    if (!rowStage) {
+      failedRows.push({ row: index + 2, error: `Stage not found: ${rowStageName}` });
+      continue;
+    }
+
+    const duplicateKey = `${company.toLowerCase()}|${phone}`;
+    if (phone && existingKeys.has(duplicateKey) && body.duplicateAction !== "import") {
+      skipped += 1;
+      continue;
+    }
+
+    const sourceName = text(sourceHeader ? row[sourceHeader] : "");
+    const rawPriority = text(row[mappings.get("Priority") ?? ""]).toLowerCase();
+    const priority = priorityValues.has(rawPriority) ? rawPriority as "hot" | "warm" | "cold" : undefined;
+    const followUpDate = dateValue(text(row[mappings.get("Follow-up Date") ?? ""]));
+    leadData.push({
+      company,
+      contact: text(row[mappings.get("Contact Name") ?? ""]) || undefined,
+      phone: phone || undefined,
+      niche: text(row[mappings.get("Niche") ?? ""]) || undefined,
+      notes: text(row[mappings.get("Notes") ?? ""]) || undefined,
+      priority,
+      followUpDate,
+      sourceId: sourceName ? sourcesByName.get(sourceName.toLowerCase())?.id : undefined,
+      stageId: rowStage.id,
+      assigneeId: rowAssignee.id,
+      createdBy: profile.id,
+    });
+  }
+
+  if (leadData.length > 0) {
+    await prisma.$transaction((transaction) => transaction.lead.createMany({ data: leadData }));
+  }
+
+  return NextResponse.json({ imported: leadData.length, skipped, failedRows });
 }

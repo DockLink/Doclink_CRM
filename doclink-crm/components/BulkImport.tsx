@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, type ReactNode, type CSSProperties, type DragEvent } from "react";
+import * as XLSX from "xlsx";
 import type { UserRole } from "@/lib/types";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -53,12 +54,39 @@ function parseDelimitedText(value: string) {
     values.push(current.trim());
     return values;
   };
-  const headers = parseLine(lines[0]);
+  const headers = uniqueHeaders(parseLine(lines[0]));
   const rows = lines.slice(1).map((line) => {
     const values = parseLine(line);
     return Object.fromEntries(headers.map((header, index) => [header, values[index] ?? ""]));
   });
   return { headers, rows };
+}
+
+function uniqueHeaders(headers: string[]) {
+  const counts = new Map<string, number>();
+  return headers.map((header, index) => {
+    const base = header.trim() || `Column ${index + 1}`;
+    const count = counts.get(base) ?? 0;
+    counts.set(base, count + 1);
+    return count === 0 ? base : `${base} (${count + 1})`;
+  });
+}
+
+function parseSpreadsheet(buffer: ArrayBuffer) {
+  const workbook = XLSX.read(buffer, { type: "array" });
+  const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+  if (!worksheet) return [] as ImportRow[];
+
+  const table = XLSX.utils.sheet_to_json<Array<string | number | boolean | null>>(worksheet, {
+    header: 1,
+    defval: "",
+    raw: false,
+  });
+  const headerRow = table[0] ?? [];
+  const headers = uniqueHeaders(headerRow.map((value) => String(value)));
+  return table.slice(1)
+    .filter((row) => row.some((value) => String(value).trim()))
+    .map((row) => Object.fromEntries(headers.map((header, index) => [header, String(row[index] ?? "").trim()])));
 }
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
@@ -207,6 +235,7 @@ function Step1({ onNext }: { onNext: (rows: ImportRow[], assigneeName: string) =
   const [assignee, setAssignee] = useState("");
   const [assignees, setAssignees] = useState<string[]>([]);
   const [rows, setRows] = useState<ImportRow[]>([]);
+  const [fileError, setFileError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -226,9 +255,16 @@ function Step1({ onNext }: { onNext: (rows: ImportRow[], assigneeName: string) =
   }, []);
 
   const readFile = async (file: File) => {
+    setFileError("");
     setFile(file.name);
-    const parsed = parseDelimitedText(await file.text());
-    setRows(parsed.rows);
+    try {
+      const parsedRows = parseSpreadsheet(await file.arrayBuffer());
+      setRows(parsedRows);
+      if (parsedRows.length === 0) setFileError("No data rows were found in this file.");
+    } catch {
+      setRows([]);
+      setFileError("This file could not be read. Please upload a valid CSV or Excel file.");
+    }
   };
 
   const handleDrop = (e: DragEvent) => {
@@ -274,7 +310,7 @@ function Step1({ onNext }: { onNext: (rows: ImportRow[], assigneeName: string) =
               <FileIcon />
               <span style={{ fontSize: 14, fontWeight: 600, color: "#111111" }}>{file}</span>
               <button
-                onClick={(e) => { e.stopPropagation(); setFile(null); }}
+                onClick={(e) => { e.stopPropagation(); setFile(null); setRows([]); setFileError(""); }}
                 style={{ fontSize: 11, color: "#DC2626", marginLeft: 8, fontWeight: 600 }}
               >
                 Remove
@@ -294,6 +330,7 @@ function Step1({ onNext }: { onNext: (rows: ImportRow[], assigneeName: string) =
         )}
         <input ref={fileRef} type="file" accept=".csv,.tsv,.xlsx,.xls" className="hidden" onChange={(e) => { if (e.target.files?.[0]) void readFile(e.target.files[0]); }} />
       </div>
+      {fileError && <p role="alert" style={{ fontSize: 12, color: "#DC2626" }}>{fileError}</p>}
 
       {/* Divider */}
       <div className="flex items-center gap-3">
@@ -342,7 +379,7 @@ function Step1({ onNext }: { onNext: (rows: ImportRow[], assigneeName: string) =
         <Btn onClick={() => {
           const parsed = rows.length > 0 ? { rows } : parseDelimitedText(pasteText);
           onNext(parsed.rows, assignee === "— Unassigned —" ? "" : assignee);
-        }} disabled={rows.length === 0 && !pasteText}>
+        }} disabled={rows.length === 0 && parseDelimitedText(pasteText).rows.length === 0}>
           Continue to Map Columns →
         </Btn>
       </div>
@@ -446,6 +483,7 @@ function Step3({ rows, mappings, assigneeName, onNext, onBack }: {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const totalLeads = rows.length;
+  const previewRows = rows.slice(0, 5);
 
   const mappedHeaders = mappings
     .filter((mapping) => mapping.targetField !== "— Ignore field —")
@@ -542,8 +580,8 @@ function Step3({ rows, mappings, assigneeName, onNext, onBack }: {
               </tr>
             </thead>
             <tbody>
-              {rows.slice(0, 5).map((row, i) => (
-                <tr key={i} style={{ borderBottom: i < Math.min(rows.length, 5) - 1 ? "1px solid #F3F4F6" : "none" }}
+              {previewRows.map((row, i) => (
+                <tr key={i} style={{ borderBottom: i < previewRows.length - 1 ? "1px solid #F3F4F6" : "none" }}
                   onMouseEnter={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = "#E3F7F5"; }}
                   onMouseLeave={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = "transparent"; }}
                 >
@@ -558,7 +596,7 @@ function Step3({ rows, mappings, assigneeName, onNext, onBack }: {
           </table>
         </div>
         <div className="px-3 py-2" style={{ background: "#F9FAFB", borderTop: "1px solid #E3E7EF" }}>
-          <span style={{ fontSize: 11, color: "#9CA3AF" }}>Showing 5 of {totalLeads} rows</span>
+          <span style={{ fontSize: 11, color: "#9CA3AF" }}>Showing {previewRows.length} of {totalLeads} rows</span>
         </div>
       </div>
 
