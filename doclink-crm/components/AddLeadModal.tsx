@@ -26,6 +26,13 @@ interface FormErrors {
   company?: string;
 }
 
+interface AssignableUser {
+  id: string;
+  name: string;
+  initials: string;
+  color: string;
+}
+
 // ─── Seed data ────────────────────────────────────────────────────────────────
 
 const NICHES = [
@@ -35,14 +42,6 @@ const NICHES = [
 ];
 
 const SOURCES = ["Referral", "Website", "Cold Call", "LinkedIn", "Trade Show", "Email Campaign", "Partner", "Event"];
-
-const ASSIGNEES = [
-  { name: "James Carter",  initials: "JC", color: "#2FBEB3" },
-  { name: "Aisha Santos",  initials: "AS", color: "#6366F1" },
-  { name: "Derek Kim",     initials: "DK", color: "#F97316" },
-  { name: "Natalie Wong",  initials: "NW", color: "#16A34A" },
-  { name: "Marco Rivera",  initials: "MR", color: "#F59E0B" },
-];
 
 const STAGES = [
   "New Lead", "No Answer", "Try Again", "Conversation",
@@ -76,7 +75,7 @@ const EMPTY_FORM: LeadForm = {
   phone: "",
   source: "",
   priority: null,
-  assignee: "James Carter",
+  assignee: "",
   stage: "New Lead",
   customCompanySize: "",
   customAnnualRevenue: "",
@@ -347,10 +346,31 @@ interface AddLeadModalProps {
 
 export function AddLeadModal({ mode = "add", role, showValidation = false, onClose }: AddLeadModalProps) {
   const [form, setForm] = useState<LeadForm>({ ...EMPTY_FORM });
+  const [assignees, setAssignees] = useState<AssignableUser[]>([]);
   const [errors, setErrors] = useState<FormErrors>(showValidation ? { company: "Company name is required" } : {});
   const [submitted, setSubmitted] = useState(showValidation);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
+
+  useEffect(() => {
+    if (role !== "superadmin") return;
+    const loadAssignees = async () => {
+      try {
+        const response = await fetch("/api/users");
+        const result = await response.json() as { users?: Array<AssignableUser & { status: string }>; error?: string };
+        if (!response.ok) {
+          setSaveError(result.error ?? "Unable to load users.");
+          return;
+        }
+        const activeUsers = (result.users ?? []).filter((user) => user.status === "active");
+        setAssignees(activeUsers);
+        if (activeUsers.length > 0) setForm((prev) => ({ ...prev, assignee: prev.assignee || activeUsers[0].name }));
+      } catch {
+        setSaveError("Unable to load users.");
+      }
+    };
+    void loadAssignees();
+  }, [role]);
 
   const set = <K extends keyof LeadForm>(key: K, val: LeadForm[K]) => {
     setForm((prev) => ({ ...prev, [key]: val }));
@@ -396,7 +416,7 @@ export function AddLeadModal({ mode = "add", role, showValidation = false, onClo
     }
   };
 
-  const assignee = ASSIGNEES.find((a) => a.name === form.assignee);
+  const assignee = assignees.find((a) => a.name === form.assignee);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === "Escape" && onClose) onClose(); };
@@ -520,9 +540,10 @@ export function AddLeadModal({ mode = "add", role, showValidation = false, onClo
               <SelectInput
                 value={form.assignee}
                 onChange={(v) => set("assignee", v)}
-                options={ASSIGNEES.map((a) => a.name)}
+                options={assignees.map((a) => a.name)}
                 renderOption={(name) => {
-                  const a = ASSIGNEES.find((x) => x.name === name)!;
+                  const a = assignees.find((x) => x.name === name);
+                  if (!a) return name;
                   return (
                     <div className="flex items-center gap-2.5">
                       <span className="w-6 h-6 rounded-full flex items-center justify-center text-white font-bold shrink-0" style={{ background: a.color, fontSize: 10 }}>{a.initials}</span>
@@ -531,7 +552,7 @@ export function AddLeadModal({ mode = "add", role, showValidation = false, onClo
                   );
                 }}
                 renderValue={(name) => {
-                  const a = ASSIGNEES.find((x) => x.name === name);
+                  const a = assignees.find((x) => x.name === name);
                   if (!a) return name;
                   return (
                     <div className="flex items-center gap-2">

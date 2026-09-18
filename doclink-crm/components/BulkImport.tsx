@@ -23,11 +23,6 @@ const DOCLINK_FIELDS = [
   "Annual Revenue", "Company Size", "— Ignore field —",
 ];
 
-const SAMPLE_SOURCE_HEADERS = [
-  "company_name", "full_name", "mobile", "industry",
-  "lead_source", "priority_level", "owner", "status", "next_follow_up",
-];
-
 const AUTO_MAPPINGS: Record<string, { field: string; confidence: "auto" | "confirm" }> = {
   company_name:   { field: "Company",        confidence: "auto" },
   full_name:      { field: "Contact Name",   confidence: "auto" },
@@ -39,16 +34,6 @@ const AUTO_MAPPINGS: Record<string, { field: string; confidence: "auto" | "confi
   status:         { field: "Stage",          confidence: "confirm" },
   next_follow_up: { field: "Follow-up Date", confidence: "auto" },
 };
-
-const PREVIEW_ROWS = [
-  { company_name: "Apex Dynamics",    full_name: "Oliver Chen",    mobile: "+1 555 210 4491", industry: "SaaS",       lead_source: "LinkedIn",  priority_level: "Hot",  owner: "James Carter",  status: "New Lead",      next_follow_up: "2026-09-20" },
-  { company_name: "Blue Ridge Co.",   full_name: "Nina Patel",     mobile: "+1 555 773 8812", industry: "Retail",     lead_source: "Referral",  priority_level: "Warm", owner: "Aisha Santos",  status: "Conversation",  next_follow_up: "2026-09-18" },
-  { company_name: "Clearwater Labs",  full_name: "David Müller",   mobile: "+1 555 344 6620", industry: "Pharma",     lead_source: "Trade Show",priority_level: "Cold", owner: "Derek Kim",     status: "New Lead",      next_follow_up: "2026-09-22" },
-  { company_name: "Drift Analytics",  full_name: "Sara Johansson", mobile: "+1 555 890 1123", industry: "Fintech",    lead_source: "Website",   priority_level: "Hot",  owner: "Marco Rivera",  status: "No Answer",     next_follow_up: "2026-09-17" },
-  { company_name: "EastLight Media",  full_name: "Kevin Osei",     mobile: "+1 555 561 3344", industry: "Marketing",  lead_source: "Cold Call", priority_level: "Warm", owner: "Natalie Wong",  status: "Try Again",     next_follow_up: "2026-09-19" },
-];
-
-const ASSIGNEES = ["James Carter", "Aisha Santos", "Derek Kim", "Natalie Wong", "Marco Rivera"];
 
 function parseDelimitedText(value: string) {
   const lines = value.split(/\r?\n/).filter((line) => line.trim());
@@ -220,8 +205,25 @@ function Step1({ onNext }: { onNext: (rows: ImportRow[], assigneeName: string) =
   const [pasteMode, setPasteMode] = useState(false);
   const [pasteText, setPasteText] = useState("");
   const [assignee, setAssignee] = useState("");
+  const [assignees, setAssignees] = useState<string[]>([]);
   const [rows, setRows] = useState<ImportRow[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const loadAssignees = async () => {
+      try {
+        const response = await fetch("/api/users");
+        const result = await response.json() as { users?: Array<{ name: string; status: string }> };
+        if (!response.ok) return;
+        const activeUsers = (result.users ?? []).filter((user) => user.status === "active").map((user) => user.name);
+        setAssignees(activeUsers);
+        if (activeUsers.length > 0) setAssignee(activeUsers[0]);
+      } catch {
+        // The import API will return the actionable authentication/configuration error.
+      }
+    };
+    void loadAssignees();
+  }, []);
 
   const readFile = async (file: File) => {
     setFile(file.name);
@@ -244,7 +246,7 @@ function Step1({ onNext }: { onNext: (rows: ImportRow[], assigneeName: string) =
         <div style={{ width: 220 }}>
           <SelectField
             value={assignee}
-            options={["— Unassigned —", ...ASSIGNEES]}
+            options={assignees}
             onChange={setAssignee}
           />
         </div>
@@ -351,7 +353,7 @@ function Step1({ onNext }: { onNext: (rows: ImportRow[], assigneeName: string) =
 // ─── Step 2: Map Columns ──────────────────────────────────────────────────────
 
 function Step2({ rows, onNext, onBack }: { rows: ImportRow[]; onNext: (mappings: ColumnMapping[]) => void; onBack: () => void }) {
-  const sourceHeaders = rows.length > 0 ? Object.keys(rows[0]) : SAMPLE_SOURCE_HEADERS;
+  const sourceHeaders = Object.keys(rows[0] ?? {});
   const [mappings, setMappings] = useState<ColumnMapping[]>(
     sourceHeaders.map((h) => {
       const m = AUTO_MAPPINGS[h];
@@ -541,7 +543,7 @@ function Step3({ rows, mappings, assigneeName, onNext, onBack }: {
             </thead>
             <tbody>
               {rows.slice(0, 5).map((row, i) => (
-                <tr key={i} style={{ borderBottom: i < PREVIEW_ROWS.length - 1 ? "1px solid #F3F4F6" : "none" }}
+                <tr key={i} style={{ borderBottom: i < Math.min(rows.length, 5) - 1 ? "1px solid #F3F4F6" : "none" }}
                   onMouseEnter={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = "#E3F7F5"; }}
                   onMouseLeave={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = "transparent"; }}
                 >
