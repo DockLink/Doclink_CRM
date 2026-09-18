@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { createClient } from "@/lib/supabase/client";
 import { AlertIcon, EyeIcon, SpinnerIcon, XIcon } from "./icons";
 import { inputBase, inputDefault, inputErrorCls, inputFilled } from "./input-styles";
 
@@ -16,18 +17,24 @@ export function LoginForm() {
   const [showError, setShowError] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     setShowError(false);
-    setTimeout(() => {
-      setIsLoading(false);
-      if (email.trim() && password) {
-        router.push("/dashboard");
-      } else {
-        setShowError(true);
-      }
-    }, 1200);
+
+    const { error } = await createClient().auth.signInWithPassword({
+      email: email.trim(),
+      password,
+    });
+
+    setIsLoading(false);
+    if (error) {
+      setShowError(true);
+      return;
+    }
+
+    router.push("/dashboard");
+    router.refresh();
   };
 
   const emailCls = () => {

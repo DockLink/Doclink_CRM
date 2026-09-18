@@ -6,7 +6,7 @@ import { RoleProvider } from "@/lib/role-context";
 
 export default function CrmLayout({ children }: { children: ReactNode }) {
   return (
-    <RoleProvider role="superadmin">
+    <RoleProvider>
       <Shell>{children}</Shell>
     </RoleProvider>
   );

@@ -1,0 +1,89 @@
+import { createServerClient } from "@supabase/ssr";
+import { NextResponse, type NextRequest } from "next/server";
+import type { UserRole } from "@/lib/types";
+
+const publicPaths = ["/login", "/forgot-password", "/reset-password"];
+
+async function getRole(
+  supabase: ReturnType<typeof createServerClient>,
+  user: { email?: string; app_metadata?: Record<string, unknown> },
+): Promise<UserRole | null> {
+  if (!user.email) return null;
+
+  const { data: profile, error } = await supabase
+    .from("users")
+    .select("role,is_active")
+    .eq("email", user.email)
+    .maybeSingle();
+
+  if (!error && profile) {
+    if (!profile.is_active) return null;
+    return profile.role === "superadmin" || profile.role === "admin" ? profile.role : null;
+  }
+
+  const metadataRole = user.app_metadata?.role;
+  return metadataRole === "superadmin" || metadataRole === "admin" ? metadataRole : null;
+}
+
+export async function proxy(request: NextRequest) {
+  let response = NextResponse.next({ request });
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll();
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
+          response = NextResponse.next({ request });
+          cookiesToSet.forEach(({ name, value, options }) =>
+            response.cookies.set(name, value, options),
+          );
+        },
+      },
+    },
+  );
+
+  const { data: { user } } = await supabase.auth.getUser();
+  const isPublicPath = publicPaths.some((path) => request.nextUrl.pathname.startsWith(path));
+
+  if (!user && !isPublicPath) {
+    const loginUrl = request.nextUrl.clone();
+    loginUrl.pathname = "/login";
+    loginUrl.searchParams.set("next", request.nextUrl.pathname);
+    return NextResponse.redirect(loginUrl);
+  }
+
+  if (user && request.nextUrl.pathname === "/login") {
+    const dashboardUrl = request.nextUrl.clone();
+    dashboardUrl.pathname = "/dashboard";
+    dashboardUrl.search = "";
+    return NextResponse.redirect(dashboardUrl);
+  }
+
+  const role = user ? await getRole(supabase, user) : null;
+
+  if (user && !role && !isPublicPath) {
+    const loginUrl = request.nextUrl.clone();
+    loginUrl.pathname = "/login";
+    loginUrl.searchParams.set("error", "role_not_configured");
+    return NextResponse.redirect(loginUrl);
+  }
+
+  if (user && request.nextUrl.pathname.startsWith("/settings") && role !== "superadmin") {
+    const dashboardUrl = request.nextUrl.clone();
+    dashboardUrl.pathname = "/dashboard";
+    dashboardUrl.search = "";
+    return NextResponse.redirect(dashboardUrl);
+  }
+
+  return response;
+}
+
+export const config = {
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+  ],
+};

@@ -14,6 +14,7 @@ import {
 } from "./icons";
 import { inputBase, inputDefault, inputErrorCls, inputFilled } from "./input-styles";
 import { getPasswordStrength, STRENGTH_COLORS, STRENGTH_LABELS } from "./password-utils";
+import { createClient } from "@/lib/supabase/client";
 
 export function ResetPasswordForm() {
   const searchParams = useSearchParams();
@@ -24,6 +25,7 @@ export function ResetPasswordForm() {
   const [showNew, setShowNew] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [state, setState] = useState<"default" | "loading" | "success">("default");
+  const [error, setError] = useState(false);
   const [newFocus, setNewFocus] = useState(false);
   const [confFocus, setConfFocus] = useState(false);
 
@@ -36,11 +38,17 @@ export function ResetPasswordForm() {
   const isLoading = state === "loading";
   const isSuccess = state === "success";
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!allValid) return;
     setState("loading");
-    setTimeout(() => setState("success"), 1600);
+    const { error: updateError } = await createClient().auth.updateUser({ password: newPw });
+    if (updateError) {
+      setError(true);
+      setState("default");
+      return;
+    }
+    setState("success");
   };
 
   const inputCls = (focused: boolean, hasVal: boolean, isErr?: boolean) => {
@@ -133,6 +141,9 @@ export function ResetPasswordForm() {
       </div>
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-5" noValidate>
+        {error && (
+          <p style={{ fontSize: 13, color: "#DC2626" }}>We could not update your password. Please request a new reset link.</p>
+        )}
         <div className="flex flex-col gap-1.5">
           <label htmlFor="rp-new" style={{ fontSize: 13, fontWeight: 500, color: "#374151" }}>
             New password

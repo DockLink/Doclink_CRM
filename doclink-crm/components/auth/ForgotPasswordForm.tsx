@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { AlertIcon, ArrowLeftIcon, CheckIcon, MailIcon, SpinnerIcon } from "./icons";
 import { inputBase, inputDefault, inputErrorCls, inputFilled } from "./input-styles";
+import { createClient } from "@/lib/supabase/client";
 
 const RESEND_SECONDS = 30;
 
@@ -16,7 +17,6 @@ export function ForgotPasswordForm() {
 
   useEffect(() => {
     if (state === "success") {
-      setCountdown(RESEND_SECONDS);
       timerRef.current = setInterval(() => {
         setCountdown((c) => {
           if (c <= 1) {
@@ -32,28 +32,29 @@ export function ForgotPasswordForm() {
     };
   }, [state]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const sendResetLink = async () => {
+    const { error } = await createClient().auth.resetPasswordForEmail(email.trim(), {
+      redirectTo: `${window.location.origin}/reset-password`,
+    });
+
+    if (!error) setCountdown(RESEND_SECONDS);
+    setState(error ? "error" : "success");
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.trim()) {
       setState("error");
       return;
     }
     setState("loading");
-    setTimeout(() => setState("success"), 1800);
+    await sendResetLink();
   };
 
-  const handleResend = () => {
+  const handleResend = async () => {
     if (countdown > 0) return;
-    setCountdown(RESEND_SECONDS);
-    timerRef.current = setInterval(() => {
-      setCountdown((c) => {
-        if (c <= 1) {
-          clearInterval(timerRef.current!);
-          return 0;
-        }
-        return c - 1;
-      });
-    }, 1000);
+    setState("loading");
+    await sendResetLink();
   };
 
   const isLoading = state === "loading";

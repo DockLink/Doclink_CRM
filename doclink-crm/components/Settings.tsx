@@ -167,20 +167,14 @@ interface User {
   color: string;
 }
 
-const INITIAL_USERS: User[] = [
-  { id: "u1", name: "James Carter",  email: "james@doclink.io",   role: "superadmin", status: "active",   initials: "JC", color: "#2FBEB3" },
-  { id: "u2", name: "Aisha Santos",  email: "aisha@doclink.io",   role: "admin",      status: "active",   initials: "AS", color: "#6366F1" },
-  { id: "u3", name: "Derek Kim",     email: "derek@doclink.io",   role: "admin",      status: "active",   initials: "DK", color: "#F97316" },
-  { id: "u4", name: "Natalie Wong",  email: "natalie@doclink.io", role: "admin",      status: "active",   initials: "NW", color: "#16A34A" },
-  { id: "u5", name: "Marco Rivera",  email: "marco@doclink.io",   role: "admin",      status: "active",   initials: "MR", color: "#F59E0B" },
-  { id: "u6", name: "Lena Brandt",   email: "lena@doclink.io",    role: "admin",      status: "inactive", initials: "LB", color: "#94A3B8" },
-];
-
-function AddUserModal({ onClose }: { onClose: () => void }) {
+function AddUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: (user: User) => void }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [role, setRole] = useState<UserRole>("admin");
   const [copied, setCopied] = useState(false);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
 
   const generate = () => {
     const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$";
@@ -189,11 +183,43 @@ function AddUserModal({ onClose }: { onClose: () => void }) {
 
   const copy = () => { navigator.clipboard.writeText(password).catch(() => {}); setCopied(true); setTimeout(() => setCopied(false), 1500); };
 
+  const createUser = async () => {
+    setError("");
+    if (!name.trim() || !email.trim() || !password) {
+      setError("Name, email, and password are required.");
+      return;
+    }
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters.");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const response = await fetch("/api/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, email, password, role }),
+      });
+      const result = await response.json() as { user?: User; error?: string };
+      if (!response.ok || !result.user) {
+        setError(result.error ?? "Unable to create user.");
+        return;
+      }
+      onCreated(result.user);
+      onClose();
+    } catch {
+      setError("Unable to reach the server. Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <Modal title="Add New User" onClose={onClose} footer={
       <>
         <SecondaryBtn onClick={onClose}>Cancel</SecondaryBtn>
-        <PrimaryBtn onClick={onClose}>Create User</PrimaryBtn>
+        <PrimaryBtn onClick={() => void createUser}>{saving ? "Creating..." : "Create User"}</PrimaryBtn>
       </>
     }>
       <FormField label="Full Name" required><TextInput value={name} onChange={setName} placeholder="e.g. Sarah Blake" /></FormField>
@@ -214,17 +240,40 @@ function AddUserModal({ onClose }: { onClose: () => void }) {
         </div>
       </FormField>
       <FormField label="Role">
-        <select className="w-full rounded-lg px-3 appearance-none" style={{ height: 36, border: "1.5px solid #E3E7EF", fontSize: 13, color: "#111111", background: "#FFFFFF", outline: "none" }}>
-          <option>Admin</option>
+        <select value={role} onChange={(e) => setRole(e.target.value as UserRole)} className="w-full rounded-lg px-3 appearance-none" style={{ height: 36, border: "1.5px solid #E3E7EF", fontSize: 13, color: "#111111", background: "#FFFFFF", outline: "none" }}>
+          <option value="admin">Admin</option>
+          <option value="superadmin">Superadmin</option>
         </select>
       </FormField>
+      {error && <p role="alert" style={{ fontSize: 12, color: "#DC2626" }}>{error}</p>}
     </Modal>
   );
 }
 
 function UsersFrame() {
-  const [users, setUsers] = useState(INITIAL_USERS);
+  const [users, setUsers] = useState<User[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [showAdd, setShowAdd] = useState(false);
+
+  useEffect(() => {
+    const loadUsers = async () => {
+      try {
+        const response = await fetch("/api/users");
+        const result = await response.json() as { users?: User[]; error?: string };
+        if (!response.ok) {
+          setError(result.error ?? "Unable to load users.");
+          return;
+        }
+        setUsers(result.users ?? []);
+      } catch {
+        setError("Unable to reach the server. Please refresh and try again.");
+      } finally {
+        setLoading(false);
+      }
+    };
+    void loadUsers();
+  }, []);
 
   const toggleStatus = (id: string) => setUsers((prev) => prev.map((u) => u.id === id ? { ...u, status: u.status === "active" ? "inactive" : "active" } : u));
 
@@ -241,7 +290,10 @@ function UsersFrame() {
             </tr>
           </thead>
           <tbody>
-            {users.map((u, i) => {
+            {loading && <tr><td colSpan={5} style={{ padding: 24, textAlign: "center", color: "#6B7280", fontSize: 13 }}>Loading users...</td></tr>}
+            {!loading && error && <tr><td colSpan={5} style={{ padding: 24, textAlign: "center", color: "#DC2626", fontSize: 13 }}>{error}</td></tr>}
+            {!loading && !error && users.length === 0 && <tr><td colSpan={5} style={{ padding: 24, textAlign: "center", color: "#6B7280", fontSize: 13 }}>No users found.</td></tr>}
+            {!loading && !error && users.map((u, i) => {
               const inactive = u.status === "inactive";
               return (
                 <tr key={u.id} style={{ borderBottom: i < users.length - 1 ? "1px solid #F3F4F6" : "none", opacity: inactive ? 0.55 : 1 }}
@@ -281,7 +333,7 @@ function UsersFrame() {
           </tbody>
         </table>
       </TableCard>
-      {showAdd && <AddUserModal onClose={() => setShowAdd(false)} />}
+      {showAdd && <AddUserModal onClose={() => setShowAdd(false)} onCreated={(user) => setUsers((prev) => [...prev, user])} />}
     </div>
   );
 }

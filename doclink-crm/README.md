@@ -20,6 +20,22 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Supabase authentication
+
+Create two users in Supabase Dashboard under **Authentication > Users**. Set their passwords there, then assign their roles in the Supabase SQL Editor. Roles must be stored in `raw_app_meta_data`; do not use `user_metadata` for authorization.
+
+```sql
+update auth.users
+set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb) || jsonb_build_object('role', 'superadmin')
+where email = 'superadmin@your-domain.com';
+
+update auth.users
+set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb) || jsonb_build_object('role', 'admin')
+where email = 'admin@your-domain.com';
+```
+
+Copy `.env.example` to `.env.local` and fill in the Supabase project URL and anon key. In Supabase **Authentication > URL Configuration**, add `http://localhost:3000/reset-password` to the redirect URLs. The app protects all CRM routes with the Supabase session, allows Settings only for `superadmin`, and supports sign in, sign out, password reset email, and password update.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

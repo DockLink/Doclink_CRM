@@ -2,7 +2,8 @@
 
 import { useState, type ReactNode, type CSSProperties } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 import { PAGE_ROUTES, pageTitleForPath, pathnameToPage, type UserRole } from "@/lib/types";
 import { useRole } from "@/lib/role-context";
 
@@ -129,7 +130,7 @@ function NavItem({
 
 // ─── Sidebar ─────────────────────────────────────────────────────────────────
 
-function Sidebar({ role }: { role: UserRole }) {
+function Sidebar({ role, onSignOut }: { role: UserRole; onSignOut: () => void }) {
   const pathname = usePathname();
   const page = pathnameToPage(pathname);
   const [pipelineOpen, setPipelineOpen] = useState(
@@ -258,6 +259,7 @@ function Sidebar({ role }: { role: UserRole }) {
           </div>
           <button
             type="button"
+            onClick={onSignOut}
             className="shrink-0 hover:opacity-70 transition-opacity"
             aria-label="Sign out"
             style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}
@@ -272,7 +274,7 @@ function Sidebar({ role }: { role: UserRole }) {
 
 // ─── Top bar ──────────────────────────────────────────────────────────────────
 
-function TopBar({ pageTitle, role }: { pageTitle: string; role: UserRole }) {
+function TopBar({ pageTitle, role, onSignOut }: { pageTitle: string; role: UserRole; onSignOut: () => void }) {
   const [notifOpen, setNotifOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
 
@@ -362,6 +364,7 @@ function TopBar({ pageTitle, role }: { pageTitle: string; role: UserRole }) {
                 <button
                   key={item}
                   type="button"
+                  onClick={item === "Logout" ? onSignOut : undefined}
                   className="w-full text-left px-4 py-2 text-sm hover:bg-[#F9FAFB] transition-colors"
                   style={{ fontSize: 13, color: item === "Logout" ? "#DC2626" : "#111111", background: "none", border: "none", cursor: "pointer" }}
                 >
@@ -380,13 +383,19 @@ function TopBar({ pageTitle, role }: { pageTitle: string; role: UserRole }) {
 
 export function Shell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const role = useRole();
   const pageTitle = pageTitleForPath(pathname);
+  const handleSignOut = async () => {
+    await createClient().auth.signOut();
+    router.push("/login");
+    router.refresh();
+  };
 
   return (
     <div className="min-h-screen" style={{ background: "#FAFAFA" }}>
-      <Sidebar role={role} />
-      <TopBar pageTitle={pageTitle} role={role} />
+      <Sidebar role={role} onSignOut={handleSignOut} />
+      <TopBar pageTitle={pageTitle} role={role} onSignOut={handleSignOut} />
       <main style={{ marginLeft: 240, paddingTop: 64, minHeight: "100vh" }}>
         {children}
       </main>
