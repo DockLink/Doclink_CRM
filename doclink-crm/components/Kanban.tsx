@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { UserRole } from "@/lib/types";
 import { LostReasonModal, type LostReason } from "@/components/LostReasonModal";
+import { assigneeColor, displayDate, initials, type ApiLead, urgencyFor } from "@/lib/lead-ui";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -548,10 +549,49 @@ function KanbanTopBar({ role }: { role: UserRole }) {
 // ─── Kanban board (lifted state) ───────────────────────────────────────────────
 
 export function Kanban({ role }: { role: UserRole }) {
-  const [leads, setLeads] = useState<Lead[]>(INITIAL_LEADS);
+  const [leads, setLeads] = useState<Lead[]>([]);
   const [pendingLost, setPendingLost] = useState<PendingLost | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
-  const applyStageChange = (leadId: string, newStage: string, lostReason?: LostReason) => {
+  useEffect(() => {
+    const loadLeads = async () => {
+      try {
+        const response = await fetch("/api/leads");
+        const result = await response.json() as { leads?: ApiLead[]; error?: string };
+        if (!response.ok) {
+          setError(result.error ?? "Unable to load leads.");
+          return;
+        }
+        setLeads((result.leads ?? []).map((lead) => ({
+          id: lead.id,
+          stage: lead.stage,
+          company: lead.company,
+          niche: lead.niche,
+          contact: lead.contact,
+          phone: lead.phone,
+          priority: lead.priority ?? "cold",
+          followUp: { date: displayDate(lead.followUpDate), urgency: urgencyFor(lead.followUpDate) },
+          calls: lead.calls,
+          assigneeInitials: initials(lead.assigneeName),
+          assigneeColor: assigneeColor(lead.assigneeName),
+        })));
+      } catch {
+        setError("Unable to reach the server. Please refresh and try again.");
+      } finally {
+        setLoading(false);
+      }
+    };
+    void loadLeads();
+  }, []);
+
+  const applyStageChange = async (leadId: string, newStage: string, lostReason?: LostReason) => {
+    const response = await fetch("/api/leads", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: [leadId], stage: newStage, lostReason }),
+    });
+    if (!response.ok) return;
     setLeads((prev) =>
       prev.map((l) =>
         l.id === leadId
@@ -576,7 +616,7 @@ export function Kanban({ role }: { role: UserRole }) {
       return;
     }
 
-    applyStageChange(leadId, newStage);
+    void applyStageChange(leadId, newStage);
   };
 
   return (
@@ -587,6 +627,8 @@ export function Kanban({ role }: { role: UserRole }) {
         className="flex-1 overflow-x-auto overflow-y-auto"
         style={{ padding: "16px 20px", background: "#FAFAFA" }}
       >
+        {loading && <p style={{ padding: 24, color: "#6B7280", fontSize: 13 }}>Loading leads...</p>}
+        {!loading && error && <p style={{ padding: 24, color: "#DC2626", fontSize: 13 }}>{error}</p>}
         <div className="flex gap-3" style={{ minWidth: "max-content", alignItems: "flex-start" }}>
           {STAGE_ORDER.map((stage) => (
             <KanbanColumn
@@ -605,7 +647,7 @@ export function Kanban({ role }: { role: UserRole }) {
           companyName={pendingLost.company}
           onCancel={() => setPendingLost(null)}
           onConfirm={(reason) => {
-            applyStageChange(pendingLost.leadId, "Closed Lost", reason);
+            void applyStageChange(pendingLost.leadId, "Closed Lost", reason);
             setPendingLost(null);
           }}
         />

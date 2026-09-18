@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useRef, type ReactNode, type CSSProperties, type DragEvent } from "react";
+import { useState, useRef, useEffect, type ReactNode, type CSSProperties, type DragEvent } from "react";
 import type { UserRole } from "@/lib/types";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Step = 1 | 2 | 3 | 4;
 type DuplicateAction = "skip" | "import";
+type ImportRow = Record<string, string>;
 
 interface ColumnMapping {
   sourceHeader: string;
@@ -48,6 +49,32 @@ const PREVIEW_ROWS = [
 ];
 
 const ASSIGNEES = ["James Carter", "Aisha Santos", "Derek Kim", "Natalie Wong", "Marco Rivera"];
+
+function parseDelimitedText(value: string) {
+  const lines = value.split(/\r?\n/).filter((line) => line.trim());
+  if (lines.length < 2) return { headers: [], rows: [] as ImportRow[] };
+  const delimiter = lines[0].includes("\t") ? "\t" : ",";
+  const parseLine = (line: string) => {
+    const values: string[] = [];
+    let current = "";
+    let quoted = false;
+    for (let index = 0; index < line.length; index += 1) {
+      const character = line[index];
+      if (character === '"' && line[index + 1] === '"') { current += '"'; index += 1; }
+      else if (character === '"') quoted = !quoted;
+      else if (character === delimiter && !quoted) { values.push(current.trim()); current = ""; }
+      else current += character;
+    }
+    values.push(current.trim());
+    return values;
+  };
+  const headers = parseLine(lines[0]);
+  const rows = lines.slice(1).map((line) => {
+    const values = parseLine(line);
+    return Object.fromEntries(headers.map((header, index) => [header, values[index] ?? ""]));
+  });
+  return { headers, rows };
+}
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 
@@ -187,22 +214,27 @@ function StepIndicator({ current }: { current: Step }) {
 
 // ─── Step 1: Upload ───────────────────────────────────────────────────────────
 
-function Step1({ onNext }: { onNext: () => void }) {
+function Step1({ onNext }: { onNext: (rows: ImportRow[], assigneeName: string) => void }) {
   const [dragging, setDragging] = useState(false);
   const [file, setFile] = useState<string | null>(null);
   const [pasteMode, setPasteMode] = useState(false);
   const [pasteText, setPasteText] = useState("");
   const [assignee, setAssignee] = useState("");
+  const [rows, setRows] = useState<ImportRow[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const readFile = async (file: File) => {
+    setFile(file.name);
+    const parsed = parseDelimitedText(await file.text());
+    setRows(parsed.rows);
+  };
 
   const handleDrop = (e: DragEvent) => {
     e.preventDefault();
     setDragging(false);
     const f = e.dataTransfer.files[0];
-    if (f) setFile(f.name);
+    if (f) void readFile(f);
   };
-
-  const simulateFile = () => setFile("leads_export_sep2026.csv");
 
   return (
     <div className="flex flex-col gap-6">
@@ -255,10 +287,10 @@ function Step1({ onNext }: { onNext: () => void }) {
               <p style={{ fontSize: 15, fontWeight: 600, color: "#0E7A70" }}>Drag & drop your Excel or CSV file here</p>
               <p style={{ fontSize: 12, color: "#6B7280", marginTop: 4 }}>Supported formats: .xlsx, .xls, .csv</p>
             </div>
-            <Btn onClick={() => { simulateFile(); }}>Browse Files</Btn>
+            <Btn onClick={() => fileRef.current?.click()}>Browse Files</Btn>
           </>
         )}
-        <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={(e) => { if (e.target.files?.[0]) setFile(e.target.files[0].name); }} />
+        <input ref={fileRef} type="file" accept=".csv,.tsv,.xlsx,.xls" className="hidden" onChange={(e) => { if (e.target.files?.[0]) void readFile(e.target.files[0]); }} />
       </div>
 
       {/* Divider */}
@@ -292,7 +324,10 @@ function Step1({ onNext }: { onNext: () => void }) {
               onBlur={(e) => { e.currentTarget.style.borderColor = "#E3E7EF"; }}
             />
             <div className="flex justify-end">
-              <Btn variant="secondary" onClick={() => setPasteText("Company\tContact\tPhone\tIndustry\nApex Dynamics\tOliver Chen\t+1 555 210 4491\tSaaS")}>
+              <Btn variant="secondary" onClick={() => {
+                const parsed = parseDelimitedText(pasteText);
+                setRows(parsed.rows);
+              }}>
                 Parse Pasted Data
               </Btn>
             </div>
@@ -302,7 +337,10 @@ function Step1({ onNext }: { onNext: () => void }) {
 
       {/* Footer */}
       <div className="flex justify-end pt-2" style={{ borderTop: "1px solid #E3E7EF" }}>
-        <Btn onClick={onNext} disabled={!file && !pasteText}>
+        <Btn onClick={() => {
+          const parsed = rows.length > 0 ? { rows } : parseDelimitedText(pasteText);
+          onNext(parsed.rows, assignee === "— Unassigned —" ? "" : assignee);
+        }} disabled={rows.length === 0 && !pasteText}>
           Continue to Map Columns →
         </Btn>
       </div>
@@ -312,9 +350,10 @@ function Step1({ onNext }: { onNext: () => void }) {
 
 // ─── Step 2: Map Columns ──────────────────────────────────────────────────────
 
-function Step2({ onNext, onBack }: { onNext: () => void; onBack: () => void }) {
+function Step2({ rows, onNext, onBack }: { rows: ImportRow[]; onNext: (mappings: ColumnMapping[]) => void; onBack: () => void }) {
+  const sourceHeaders = rows.length > 0 ? Object.keys(rows[0]) : SAMPLE_SOURCE_HEADERS;
   const [mappings, setMappings] = useState<ColumnMapping[]>(
-    SAMPLE_SOURCE_HEADERS.map((h) => {
+    sourceHeaders.map((h) => {
       const m = AUTO_MAPPINGS[h];
       return { sourceHeader: h, targetField: m?.field ?? "— Ignore field —", confidence: m?.confidence ?? "ignored" };
     })
@@ -385,7 +424,7 @@ function Step2({ onNext, onBack }: { onNext: () => void; onBack: () => void }) {
       {/* Footer */}
       <div className="flex items-center justify-between pt-2" style={{ borderTop: "1px solid #E3E7EF" }}>
         <Btn variant="secondary" onClick={onBack}>← Back</Btn>
-        <Btn onClick={onNext}>Continue to Preview →</Btn>
+        <Btn onClick={() => onNext(mappings)}>Continue to Preview →</Btn>
       </div>
     </div>
   );
@@ -393,21 +432,63 @@ function Step2({ onNext, onBack }: { onNext: () => void; onBack: () => void }) {
 
 // ─── Step 3: Preview & Confirm ────────────────────────────────────────────────
 
-function Step3({ onNext, onBack }: { onNext: () => void; onBack: () => void }) {
+function Step3({ rows, mappings, assigneeName, onNext, onBack }: {
+  rows: ImportRow[];
+  mappings: ColumnMapping[];
+  assigneeName: string;
+  onNext: (result: { imported: number; skipped: number; failed: number }) => void;
+  onBack: () => void;
+}) {
   const [dupAction, setDupAction] = useState<DuplicateAction>("skip");
-  const totalLeads = 142;
-  const duplicates = 12;
+  const [duplicates, setDuplicates] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const totalLeads = rows.length;
 
-  const mappedHeaders: { key: keyof typeof PREVIEW_ROWS[0]; label: string }[] = [
-    { key: "company_name",   label: "Company" },
-    { key: "full_name",      label: "Contact" },
-    { key: "mobile",         label: "Phone" },
-    { key: "industry",       label: "Niche" },
-    { key: "lead_source",    label: "Source" },
-    { key: "priority_level", label: "Priority" },
-    { key: "owner",          label: "Assignee" },
-    { key: "status",         label: "Stage" },
-  ];
+  const mappedHeaders = mappings
+    .filter((mapping) => mapping.targetField !== "— Ignore field —")
+    .map((mapping) => ({ key: mapping.sourceHeader, label: mapping.targetField }));
+
+  useEffect(() => {
+    const findDuplicates = async () => {
+      const response = await fetch("/api/leads");
+      if (!response.ok) return;
+      const result = await response.json() as { leads?: Array<{ company: string; phone: string }> };
+      const existing = new Set((result.leads ?? []).map((lead) => `${lead.company.toLowerCase()}|${lead.phone}`));
+      const companyHeader = mappings.find((mapping) => mapping.targetField === "Company")?.sourceHeader;
+      const phoneHeader = mappings.find((mapping) => mapping.targetField === "Phone")?.sourceHeader;
+      if (!companyHeader || !phoneHeader) return;
+      setDuplicates(rows.filter((row) => existing.has(`${row[companyHeader].toLowerCase()}|${row[phoneHeader]}`)).length);
+    };
+    void findDuplicates();
+  }, [mappings, rows]);
+
+  const confirmImport = async () => {
+    setError("");
+    setSaving(true);
+    try {
+      const response = await fetch("/api/leads/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rows,
+          mappings: mappings.map(({ sourceHeader, targetField }) => ({ sourceHeader, targetField })),
+          duplicateAction: dupAction,
+          assigneeName,
+        }),
+      });
+      const result = await response.json() as { imported?: number; skipped?: number; failedRows?: unknown[]; error?: string };
+      if (!response.ok) {
+        setError(result.error ?? "Unable to import leads.");
+        return;
+      }
+      onNext({ imported: result.imported ?? 0, skipped: result.skipped ?? 0, failed: result.failedRows?.length ?? 0 });
+    } catch {
+      setError("Unable to reach the server. Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div className="flex flex-col gap-5">
@@ -459,20 +540,14 @@ function Step3({ onNext, onBack }: { onNext: () => void; onBack: () => void }) {
               </tr>
             </thead>
             <tbody>
-              {PREVIEW_ROWS.map((row, i) => (
+              {rows.slice(0, 5).map((row, i) => (
                 <tr key={i} style={{ borderBottom: i < PREVIEW_ROWS.length - 1 ? "1px solid #F3F4F6" : "none" }}
                   onMouseEnter={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = "#E3F7F5"; }}
                   onMouseLeave={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = "transparent"; }}
                 >
                   {mappedHeaders.map((h) => (
                     <td key={h.key} className="px-3 py-2.5" style={{ fontSize: 12, color: "#374151", whiteSpace: "nowrap" }}>
-                      {h.key === "priority_level" ? (
-                        <span style={{ color: row[h.key] === "Hot" ? "#EF4444" : row[h.key] === "Warm" ? "#F59E0B" : "#3B82F6", fontWeight: 600, fontSize: 11 }}>
-                          ● {row[h.key]}
-                        </span>
-                      ) : h.key === "status" ? (
-                        <span className="px-2 py-0.5 rounded-full" style={{ fontSize: 11, fontWeight: 600, background: "#F1F5F9", color: "#64748B" }}>{row[h.key]}</span>
-                      ) : row[h.key]}
+                      {row[h.key]}
                     </td>
                   ))}
                 </tr>
@@ -489,7 +564,7 @@ function Step3({ onNext, onBack }: { onNext: () => void; onBack: () => void }) {
       <div className="flex items-center gap-3 rounded-lg px-4 py-3" style={{ background: "#E3F7F5", border: "1px solid #A7F3D0" }}>
         <CheckCircleIcon size={16} />
         <p style={{ fontSize: 13, color: "#0E7A70", fontWeight: 500 }}>
-          <strong>{dupAction === "skip" ? totalLeads - duplicates : totalLeads} leads</strong> ready to import · All will start at <strong>"New Lead"</strong> stage.
+          <strong>{dupAction === "skip" ? totalLeads - duplicates : totalLeads} leads</strong> ready to import · All will start at <strong>&quot;New Lead&quot;</strong> stage.
           {dupAction === "skip" && <span style={{ color: "#B45309", marginLeft: 6 }}>{duplicates} duplicates will be skipped.</span>}
         </p>
       </div>
@@ -497,7 +572,8 @@ function Step3({ onNext, onBack }: { onNext: () => void; onBack: () => void }) {
       {/* Footer */}
       <div className="flex items-center justify-between pt-2" style={{ borderTop: "1px solid #E3E7EF" }}>
         <Btn variant="secondary" onClick={onBack}>← Back</Btn>
-        <Btn onClick={onNext}>Confirm Import →</Btn>
+        {error && <p role="alert" style={{ fontSize: 12, color: "#DC2626" }}>{error}</p>}
+        <Btn onClick={() => void confirmImport()} disabled={saving}>{saving ? "Importing..." : "Confirm Import →"}</Btn>
       </div>
     </div>
   );
@@ -505,11 +581,11 @@ function Step3({ onNext, onBack }: { onNext: () => void; onBack: () => void }) {
 
 // ─── Step 4: Done ─────────────────────────────────────────────────────────────
 
-function Step4({ onRestart, onViewPipeline }: { onRestart: () => void; onViewPipeline: () => void }) {
+function Step4({ result, onRestart, onViewPipeline }: { result: { imported: number; skipped: number; failed: number }; onRestart: () => void; onViewPipeline: () => void }) {
   const stats = [
-    { label: "Imported",          value: 130, bg: "#DCFCE7", color: "#16A34A", valueBg: "#16A34A" },
-    { label: "Skipped Duplicates", value: 12,  bg: "#FEF3C7", color: "#B45309", valueBg: "#D97706" },
-    { label: "Failed Rows",        value: 0,   bg: "#FEE2E2", color: "#DC2626", valueBg: "#DC2626" },
+    { label: "Imported",          value: result.imported, bg: "#DCFCE7", color: "#16A34A", valueBg: "#16A34A" },
+    { label: "Skipped Duplicates", value: result.skipped,  bg: "#FEF3C7", color: "#B45309", valueBg: "#D97706" },
+    { label: "Failed Rows",        value: result.failed,   bg: "#FEE2E7", color: "#DC2626", valueBg: "#DC2626" },
   ];
 
   return (
@@ -568,6 +644,10 @@ interface BulkImportProps {
 
 export function BulkImport({ initialStep = 1, onNavigate }: BulkImportProps) {
   const [step, setStep] = useState<Step>(initialStep);
+  const [rows, setRows] = useState<ImportRow[]>([]);
+  const [mappings, setMappings] = useState<ColumnMapping[]>([]);
+  const [assigneeName, setAssigneeName] = useState("");
+  const [result, setResult] = useState({ imported: 0, skipped: 0, failed: 0 });
 
   return (
     <div
@@ -588,11 +668,12 @@ export function BulkImport({ initialStep = 1, onNavigate }: BulkImportProps) {
         <StepIndicator current={step} />
 
         {/* Step content */}
-        {step === 1 && <Step1 onNext={() => setStep(2)} />}
-        {step === 2 && <Step2 onNext={() => setStep(3)} onBack={() => setStep(1)} />}
-        {step === 3 && <Step3 onNext={() => setStep(4)} onBack={() => setStep(2)} />}
+        {step === 1 && <Step1 onNext={(nextRows, nextAssignee) => { setRows(nextRows); setAssigneeName(nextAssignee); setStep(2); }} />}
+        {step === 2 && <Step2 rows={rows} onNext={(nextMappings) => { setMappings(nextMappings); setStep(3); }} onBack={() => setStep(1)} />}
+        {step === 3 && <Step3 rows={rows} mappings={mappings} assigneeName={assigneeName} onNext={(nextResult) => { setResult(nextResult); setStep(4); }} onBack={() => setStep(2)} />}
         {step === 4 && (
           <Step4
+            result={result}
             onRestart={() => setStep(1)}
             onViewPipeline={() => onNavigate?.("pipeline-list")}
           />

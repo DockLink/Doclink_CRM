@@ -349,6 +349,8 @@ export function AddLeadModal({ mode = "add", role, showValidation = false, onClo
   const [form, setForm] = useState<LeadForm>({ ...EMPTY_FORM });
   const [errors, setErrors] = useState<FormErrors>(showValidation ? { company: "Company name is required" } : {});
   const [submitted, setSubmitted] = useState(showValidation);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
 
   const set = <K extends keyof LeadForm>(key: K, val: LeadForm[K]) => {
     setForm((prev) => ({ ...prev, [key]: val }));
@@ -357,13 +359,40 @@ export function AddLeadModal({ mode = "add", role, showValidation = false, onClo
     }
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     setSubmitted(true);
     const newErrors: FormErrors = {};
     if (!form.company.trim()) newErrors.company = "Company name is required";
     setErrors(newErrors);
-    if (Object.keys(newErrors).length === 0) {
+    if (Object.keys(newErrors).length > 0 || mode === "edit") return;
+
+    setSaveError("");
+    setSaving(true);
+    try {
+      const response = await fetch("/api/leads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          company: form.company,
+          niche: form.niche,
+          contact: form.contact,
+          phone: form.phone,
+          source: form.source,
+          priority: form.priority,
+          assigneeName: role === "superadmin" ? form.assignee : undefined,
+          stage: form.stage,
+        }),
+      });
+      const result = await response.json() as { error?: string };
+      if (!response.ok) {
+        setSaveError(result.error ?? "Unable to save lead.");
+        return;
+      }
       onClose?.();
+    } catch {
+      setSaveError("Unable to reach the server. Please try again.");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -604,6 +633,7 @@ export function AddLeadModal({ mode = "add", role, showValidation = false, onClo
           className="flex items-center justify-end gap-3 px-6 py-4 shrink-0"
           style={{ borderTop: "1px solid #E3E7EF" }}
         >
+          {saveError && <p role="alert" style={{ marginRight: "auto", maxWidth: 280, fontSize: 12, color: "#DC2626" }}>{saveError}</p>}
           <button
             type="button"
             onClick={onClose}
@@ -617,12 +647,13 @@ export function AddLeadModal({ mode = "add", role, showValidation = false, onClo
           <button
             type="button"
             onClick={handleSave}
+            disabled={saving}
             className="rounded-lg font-semibold"
             style={{ height: 38, paddingInline: 20, fontSize: 13, color: "#FFFFFF", background: "#2FBEB3" }}
             onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#0E7A70"; }}
             onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#2FBEB3"; }}
           >
-            {mode === "edit" ? "Save Changes" : "Save Lead"}
+            {saving ? "Saving..." : mode === "edit" ? "Save Changes" : "Save Lead"}
           </button>
         </div>
       </div>

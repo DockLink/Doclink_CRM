@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, type ReactNode, type CSSProperties } from 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { UserRole } from "@/lib/types";
+import { assigneeColor, displayDate, displayTime, initials, type ApiLead, urgencyFor } from "@/lib/lead-ui";
 
 // ─── Palette ──────────────────────────────────────────────────────────────────
 
@@ -488,7 +489,9 @@ type SortKey = keyof ListLead | null;
 
 export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: boolean }) {
   const router = useRouter();
-  const [leads, setLeads] = useState<ListLead[]>(LEADS);
+  const [leads, setLeads] = useState<ListLead[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [filters, setFiltersState] = useState<Record<string, string | null>>({
     stage: null, assignee: null, niche: null, priority: null, dateRange: null,
   });
@@ -497,6 +500,45 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
   const [page, setPage]         = useState(1);
   const [sortKey, setSortKey]   = useState<SortKey>("followUpDate");
   const [sortDir, setSortDir]   = useState<"up" | "down">("up");
+
+  useEffect(() => {
+    const loadLeads = async () => {
+      try {
+        const response = await fetch("/api/leads");
+        const result = await response.json() as { leads?: ApiLead[]; error?: string };
+        if (!response.ok) {
+          setError(result.error ?? "Unable to load leads.");
+          return;
+        }
+        setLeads((result.leads ?? []).map((lead) => {
+          const stageDate = lead.stageChangedAt ? new Date(lead.stageChangedAt) : new Date(lead.createdAt);
+          return {
+            id: lead.id,
+            priority: lead.priority ?? "cold",
+            company: lead.company,
+            niche: lead.niche,
+            source: lead.source,
+            contact: lead.contact,
+            phone: lead.phone,
+            stage: lead.stage,
+            followUpDate: displayDate(lead.followUpDate),
+            followUpTime: displayTime(lead.followUpTime),
+            daysInStage: Math.max(0, Math.floor((Date.now() - stageDate.getTime()) / 86400000)),
+            calls: lead.calls,
+            assigneeInitials: initials(lead.assigneeName),
+            assigneeName: lead.assigneeName,
+            assigneeColor: assigneeColor(lead.assigneeName),
+            urgency: urgencyFor(lead.followUpDate),
+          };
+        }));
+      } catch {
+        setError("Unable to reach the server. Please refresh and try again.");
+      } finally {
+        setLoading(false);
+      }
+    };
+    void loadLeads();
+  }, []);
 
   const setFilter = (key: string, val: string | null) =>
     setFiltersState((prev) => ({ ...prev, [key]: val }));
@@ -551,18 +593,30 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
     else { setSortKey(key); setSortDir("up"); }
   };
 
-  const handleBulkReassign = (assigneeName: string) => {
+  const handleBulkReassign = async (assigneeName: string) => {
     const assignee = ASSIGNEES.find((candidate) => candidate.name === assigneeName);
     if (!assignee || !window.confirm(`Reassign ${selected.size} selected lead${selected.size === 1 ? "" : "s"} to ${assignee.name}?`)) return;
 
+    const response = await fetch("/api/leads", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: [...selected], assigneeName: assignee.name }),
+    });
+    if (!response.ok) return;
     setLeads((prev) => prev.map((lead) => selected.has(lead.id)
       ? { ...lead, assigneeName: assignee.name, assigneeInitials: assignee.initials, assigneeColor: assignee.color }
       : lead));
     setSelected(new Set());
   };
 
-  const handleBulkDelete = () => {
+  const handleBulkDelete = async () => {
     if (!window.confirm(`Delete ${selected.size} selected lead${selected.size === 1 ? "" : "s"}? This cannot be undone.`)) return;
+    const response = await fetch("/api/leads", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: [...selected] }),
+    });
+    if (!response.ok) return;
     setLeads((prev) => prev.filter((lead) => !selected.has(lead.id)));
     setSelected(new Set());
   };
@@ -576,6 +630,8 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
 
       {/* Table container */}
       <div className="flex-1 overflow-auto" style={{ padding: "16px 20px 80px" }}>
+        {loading && <p style={{ padding: 24, color: "#6B7280", fontSize: 13 }}>Loading leads...</p>}
+        {!loading && error && <p style={{ padding: 24, color: "#DC2626", fontSize: 13 }}>{error}</p>}
         <div
           style={{
             background: "#FFFFFF",

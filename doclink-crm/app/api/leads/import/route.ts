@@ -26,6 +26,7 @@ export async function POST(request: Request) {
     where: { OR: [{ id: user.id }, { email: user.email ?? "" }], isActive: true },
   });
   if (!profile) return NextResponse.json({ error: "Active CRM user not found" }, { status: 403 });
+  if (profile.role !== "superadmin") return NextResponse.json({ error: "Only superadmins can import leads" }, { status: 403 });
 
   const body = await request.json() as {
     rows?: ImportRow[];
