@@ -573,6 +573,7 @@ export function Kanban({ role }: { role: UserRole }) {
           priority: lead.priority ?? "cold",
           followUp: { date: displayDate(lead.followUpDate), urgency: urgencyFor(lead.followUpDate) },
           calls: lead.calls,
+          neverContacted: lead.calls === 0,
           assigneeInitials: initials(lead.assigneeName),
           assigneeColor: assigneeColor(lead.assigneeName),
         })));
@@ -591,7 +592,12 @@ export function Kanban({ role }: { role: UserRole }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ids: [leadId], stage: newStage, lostReason }),
     });
-    if (!response.ok) return;
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({})) as { error?: string };
+      setError(result.error ?? "Unable to move this lead.");
+      return;
+    }
+    setError("");
     setLeads((prev) =>
       prev.map((l) =>
         l.id === leadId

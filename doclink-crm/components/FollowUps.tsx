@@ -3,6 +3,8 @@
 import { useState, useRef, useEffect, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import type { UserRole } from "@/lib/types";
+import { type ApiLead, urgencyFor } from "@/lib/lead-ui";
+import { LogCallModal, type LogCallForm } from "@/components/LogCallModal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -27,32 +29,80 @@ interface FollowUp {
   notes: string;
 }
 
-// ─── Mock data ────────────────────────────────────────────────────────────────
+const STAGE_COLOR: Record<string, string> = {
+  "New Lead": "#94A3B8",
+  "No Answer": "#FB923C",
+  "Try Again": "#F97316",
+  "Conversation": "#38BDF8",
+  "Proposal Sent": "#6366F1",
+  "Meeting Booked": "#F59E0B",
+  "Estimate Sent": "#0891B2",
+  "Closed Won": "#16A34A",
+  "Closed Lost": "#57534E",
+  "Dead Lead": "#DC2626",
+};
 
-const TODAY_DATE = "2026-09-15";
+function localDateKey(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
 
-const ALL_FOLLOWUPS: FollowUp[] = [
-  // ── Today
-  { id: "t1", company: "Meridian Corp",    contact: "Sarah Blake",  phone: "+1 555 340 9921", priority: "hot",  stage: "Conversation",   niche: "Enterprise SaaS", date: TODAY_DATE, time: "09:00", timeLabel: "9:00 AM",  urgency: "today",    assignee: "James Carter",  calls: 5,  notes: "Decision maker confirmed budget. Push for close." },
-  { id: "t2", company: "Vanguard Tech",    contact: "Raj Patel",    phone: "+1 555 991 2254", priority: "warm", stage: "Proposal Sent",  niche: "Deep Tech",       date: TODAY_DATE, time: "10:30", timeLabel: "10:30 AM", urgency: "today",    assignee: "Derek Kim",     calls: 4,  notes: "Follow up on proposal, ask about concerns." },
-  { id: "t3", company: "Ironbridge Group", contact: "Paul Denton",  phone: "+1 555 382 9901", priority: "hot",  stage: "Estimate Sent",  niche: "Infrastructure",  date: TODAY_DATE, time: "11:00", timeLabel: "11:00 AM", urgency: "today",    assignee: "James Carter",  calls: 7,  notes: "Sent revised estimate yesterday. Confirm receipt." },
-  { id: "t4", company: "Atlas Holdings",   contact: "Carlos Ruiz",  phone: "+1 555 771 5543", priority: "warm", stage: "Try Again",      niche: "Real Estate",     date: TODAY_DATE, time: "13:30", timeLabel: "1:30 PM",  urgency: "today",    assignee: "Natalie Wong",  calls: 3,  notes: "Third attempt. Try a different angle." },
-  { id: "t5", company: "Crestline Labs",   contact: "Priya Singh",  phone: "+1 555 443 0091", priority: "hot",  stage: "No Answer",      niche: "Pharma",          date: TODAY_DATE, time: "14:00", timeLabel: "2:00 PM",  urgency: "today",    assignee: "Aisha Santos",  calls: 2,  notes: "No answer twice. Try this slot." },
-  { id: "t6", company: "Solaris Group",    contact: "Emma Novak",   phone: "+1 555 508 1177", priority: "cold", stage: "Conversation",   niche: "Clean Energy",    date: TODAY_DATE, time: "16:00", timeLabel: "4:00 PM",  urgency: "today",    assignee: "Marco Rivera",  calls: 4,  notes: "Scheduled by lead last week." },
+function storedDateKey(iso: string | null) {
+  return iso ? iso.slice(0, 10) : "";
+}
 
-  // ── Missed / Overdue
-  { id: "m1", company: "Pinnacle Health",  contact: "Diane Yuen",   phone: "+1 555 219 6644", priority: "warm", stage: "Conversation",   niche: "Healthcare",      date: "2026-09-14", time: "16:00", timeLabel: "4:00 PM",  urgency: "overdue", overdueLabel: "Overdue by 22h", assignee: "Aisha Santos",  calls: 3,  notes: "Was meant to close the loop on pricing." },
-  { id: "m2", company: "Nexus Digital",    contact: "Tom Brennan",  phone: "+1 555 774 3300", priority: "hot",  stage: "Proposal Sent",  niche: "Agency",          date: "2026-09-14", time: "11:00", timeLabel: "11:00 AM", urgency: "overdue", overdueLabel: "Overdue by 1d",  assignee: "James Carter",  calls: 6,  notes: "Proposal follow-up. High priority — hot lead." },
-  { id: "m3", company: "Orion Partners",   contact: "Julia Chen",   phone: "+1 555 662 7712", priority: "warm", stage: "No Answer",      niche: "Logistics",       date: "2026-09-13", time: "09:00", timeLabel: "9:00 AM",  urgency: "overdue", overdueLabel: "Overdue by 2d",  assignee: "Derek Kim",     calls: 1,  notes: "Reached once but no callback. Escalate." },
+function timeParts(iso: string | null) {
+  if (!iso) return { sort: "99:99", label: "—" };
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return { sort: "99:99", label: "—" };
+  const hours = date.getUTCHours();
+  const minutes = date.getUTCMinutes();
+  const period = hours >= 12 ? "PM" : "AM";
+  const hour12 = hours % 12 || 12;
+  return {
+    sort: `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`,
+    label: `${hour12}:${String(minutes).padStart(2, "0")} ${period}`,
+  };
+}
 
-  // ── Upcoming (next 7 days, grouped by date)
-  { id: "u1", company: "Summit Partners",  contact: "Keiko Tanaka", phone: "+1 555 663 4410", priority: "warm", stage: "Meeting Booked", niche: "Consulting",      date: "2026-09-16", time: "14:00", timeLabel: "2:00 PM",  urgency: "upcoming", assignee: "Aisha Santos",  calls: 5,  notes: "Meeting confirmed. Prep deck." },
-  { id: "u2", company: "Vertex Systems",   contact: "Angela Park",  phone: "+1 555 201 4432", priority: "cold", stage: "New Lead",       niche: "SaaS",            date: "2026-09-17", time: "09:00", timeLabel: "9:00 AM",  urgency: "upcoming", assignee: "James Carter",  calls: 0,  notes: "First outreach. Research company before call." },
-  { id: "u3", company: "Clearpath Media",  contact: "Sofia Reyes",  phone: "+1 555 114 5530", priority: "warm", stage: "Estimate Sent",  niche: "Marketing",       date: "2026-09-20", time: "10:00", timeLabel: "10:00 AM", urgency: "upcoming", assignee: "Natalie Wong",  calls: 5,  notes: "Follow up on estimate sent 15 Sep." },
-  { id: "u4", company: "Redwood Capital",  contact: "Marcus Webb",  phone: "+1 555 430 8823", priority: "warm", stage: "Conversation",   niche: "Investment",      date: "2026-09-18", time: "13:00", timeLabel: "1:00 PM",  urgency: "upcoming", assignee: "Natalie Wong",  calls: 2,  notes: "Revisit ROI numbers." },
-  { id: "u5", company: "Luminary Co.",     contact: "Ben Howell",   phone: "+1 555 887 3310", priority: "cold", stage: "New Lead",       niche: "Fintech",         date: "2026-09-16", time: "11:00", timeLabel: "11:00 AM", urgency: "upcoming", assignee: "Marco Rivera",  calls: 0,  notes: "Cold lead. Introduce service briefly." },
-  { id: "u6", company: "Crestview Corp",   contact: "Liam O'Brien", phone: "+1 555 335 7720", priority: "cold", stage: "Closed Lost",    niche: "Retail",          date: "2026-09-21", time: "11:00", timeLabel: "11:00 AM", urgency: "upcoming", assignee: "Marco Rivera",  calls: 3,  notes: "Re-engagement check-in after 30 days." },
-];
+function overdueLabel(dateKey: string) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const target = new Date(year, month - 1, day);
+  const days = Math.max(1, Math.round((today.getTime() - target.getTime()) / 86_400_000));
+  return `Overdue by ${days}d`;
+}
+
+function toFollowUp(lead: ApiLead): FollowUp | null {
+  if (!lead.followUpDate) return null;
+  const urgency = urgencyFor(lead.followUpDate);
+  if (urgency === "none") return null;
+  const date = storedDateKey(lead.followUpDate);
+  const time = timeParts(lead.followUpTime);
+  const today = localDateKey();
+  const horizon = localDateKey(new Date(Date.now() + 7 * 86_400_000));
+  if (urgency === "upcoming" && (date <= today || date > horizon)) return null;
+  return {
+    id: lead.id,
+    company: lead.company,
+    contact: lead.contact || "—",
+    phone: lead.phone || "—",
+    priority: lead.priority ?? "cold",
+    stage: lead.stage,
+    niche: lead.niche || "—",
+    date,
+    time: time.sort,
+    timeLabel: time.label,
+    urgency,
+    overdueLabel: urgency === "overdue" ? overdueLabel(date) : undefined,
+    assignee: lead.assigneeName,
+    calls: lead.calls,
+    notes: [outcomeLabel(lead.lastOutcome), lead.lastNotes].filter(Boolean).join(" — "),
+  };
+}
 
 const PRIORITY_COLOR: Record<Priority, string> = {
   hot: "#EF4444",
@@ -66,18 +116,31 @@ const PRIORITY_LABEL: Record<Priority, string> = {
   cold: "Cold",
 };
 
+const OUTCOME_LABEL: Record<string, string> = {
+  answered: "Answered",
+  no_answer: "No Answer",
+  callback_requested: "Callback Requested",
+  voicemail: "Voicemail Left",
+  proposal_discussed: "Proposal Discussed",
+  meeting_set: "Meeting Set",
+};
+
+function outcomeLabel(outcome?: string) {
+  if (!outcome) return "";
+  return OUTCOME_LABEL[outcome] ?? outcome;
+}
+
 // ─── Date labels ──────────────────────────────────────────────────────────────
 
 function dateSectionLabel(dateStr: string): string {
-  const map: Record<string, string> = {
-    "2026-09-16": "Tomorrow — Wed, 16 Sep",
-    "2026-09-17": "Thursday, 17 Sep",
-    "2026-09-18": "Friday, 18 Sep",
-    "2026-09-19": "Saturday, 19 Sep",
-    "2026-09-20": "Sunday, 20 Sep",
-    "2026-09-21": "Monday, 21 Sep",
-  };
-  return map[dateStr] ?? dateStr;
+  const [year, month, day] = dateStr.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+  const formatted = date.toLocaleDateString("en-US", { weekday: "long", day: "numeric", month: "short" });
+  const tomorrow = new Date();
+  tomorrow.setHours(0, 0, 0, 0);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  if (date.getTime() === tomorrow.getTime()) return `Tomorrow — ${formatted}`;
+  return formatted;
 }
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
@@ -129,7 +192,15 @@ function UserIcon() {
 
 // ─── Kebab Menu ───────────────────────────────────────────────────────────────
 
-function KebabMenu({ onReschedule, onMarkDone }: { onReschedule: () => void; onMarkDone: () => void }) {
+function KebabMenu({
+  onReschedule,
+  onMarkDone,
+  onViewLead,
+}: {
+  onReschedule: () => void;
+  onMarkDone: () => void;
+  onViewLead: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -161,7 +232,7 @@ function KebabMenu({ onReschedule, onMarkDone }: { onReschedule: () => void; onM
           {[
             { label: "Reschedule", action: onReschedule },
             { label: "Mark as Done", action: onMarkDone },
-            { label: "View Lead", action: () => {} },
+            { label: "View Lead", action: onViewLead },
           ].map(({ label, action }) => (
             <button
               key={label}
@@ -186,10 +257,16 @@ function FollowUpRow({
   lead,
   variant,
   onClick,
+  onCall,
+  onReschedule,
+  onMarkDone,
 }: {
   lead: FollowUp;
   variant: "today" | "overdue" | "upcoming";
   onClick: () => void;
+  onCall: () => void;
+  onReschedule: () => void;
+  onMarkDone: () => void;
 }) {
   const rowBg =
     variant === "overdue" ? "#FFF8F8" :
@@ -223,9 +300,17 @@ function FollowUpRow({
       </div>
 
       {/* Company + niche */}
-      <div style={{ flex: "0 0 180px" }}>
+      <div style={{ flex: "0 0 240px" }}>
         <p style={{ fontSize: 13, fontWeight: 600, color: "#111111", marginBottom: 1 }}>{lead.company}</p>
-        <p style={{ fontSize: 11, color: "#6B7280" }}>{lead.niche}</p>
+        <p className="flex items-center gap-1.5" style={{ fontSize: 11, color: "#6B7280" }}>
+          <span>{lead.niche}</span>
+          <span className="px-1.5 py-0.5 rounded-full" style={{ background: `${STAGE_COLOR[lead.stage] ?? "#94A3B8"}22`, color: STAGE_COLOR[lead.stage] ?? "#64748B", fontWeight: 600 }}>
+            {lead.stage}
+          </span>
+        </p>
+        {lead.notes && (
+          <p style={{ fontSize: 11, color: "#374151", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{lead.notes}</p>
+        )}
       </div>
 
       {/* Contact + phone */}
@@ -249,9 +334,18 @@ function FollowUpRow({
         {lead.assignee}
       </div>
 
+      <span
+        className="shrink-0 px-2 py-1 rounded-full"
+        style={{ fontSize: 11, fontWeight: 700, color: "#0E7A70", background: "#E3F7F5" }}
+      >
+        {lead.calls} {lead.calls === 1 ? "call" : "calls"}
+      </span>
+
       {/* Actions */}
       <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
         <button
+          type="button"
+          onClick={onCall}
           className="flex items-center gap-1.5 rounded-lg font-semibold"
           style={{ height: 32, paddingInline: 12, border: "1.5px solid #2FBEB3", color: "#0E7A70", fontSize: 12, background: "transparent" }}
           onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#E3F7F5"; }}
@@ -259,7 +353,7 @@ function FollowUpRow({
         >
           <PhoneIcon /> Call Now
         </button>
-        <KebabMenu onReschedule={() => {}} onMarkDone={() => {}} />
+        <KebabMenu onReschedule={onReschedule} onMarkDone={onMarkDone} onViewLead={onClick} />
       </div>
     </div>
   );
@@ -324,13 +418,173 @@ function SectionHeader({
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
+function RescheduleModal({
+  lead,
+  onClose,
+  onSave,
+}: {
+  lead: FollowUp;
+  onClose: () => void;
+  onSave: (date: string, time: string) => void;
+}) {
+  const [date, setDate] = useState(lead.date);
+  const [time, setTime] = useState(lead.time === "99:99" ? "" : lead.time);
+  const [error, setError] = useState("");
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center" style={{ background: "rgba(15,27,60,0.45)" }} onClick={onClose}>
+      <div
+        className="flex flex-col"
+        style={{ width: 420, background: "#FFFFFF", borderRadius: 12, border: "1px solid #E3E7EF", boxShadow: "0 8px 48px rgba(15,27,60,0.18)" }}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="px-6 py-4" style={{ borderBottom: "1px solid #E3E7EF" }}>
+          <h3 style={{ fontSize: 15, fontWeight: 700, color: "#111111" }}>Reschedule — {lead.company}</h3>
+          <p style={{ fontSize: 12, color: "#6B7280", marginTop: 4 }}>Updates the follow-up on this pipeline lead.</p>
+        </div>
+        <div className="px-6 py-5 flex gap-3">
+          <label className="flex-1" style={{ fontSize: 11, fontWeight: 600, color: "#6B7280" }}>
+            Date
+            <input type="date" value={date} onChange={(event) => setDate(event.target.value)} className="w-full rounded-lg px-3 mt-1.5" style={{ height: 36, border: "1.5px solid #E3E7EF", fontSize: 13, color: "#111111" }} />
+          </label>
+          <label className="flex-1" style={{ fontSize: 11, fontWeight: 600, color: "#6B7280" }}>
+            Time
+            <input type="time" value={time} onChange={(event) => setTime(event.target.value)} className="w-full rounded-lg px-3 mt-1.5" style={{ height: 36, border: "1.5px solid #E3E7EF", fontSize: 13, color: "#111111" }} />
+          </label>
+        </div>
+        {error && <p className="px-6" style={{ fontSize: 12, color: "#DC2626", marginTop: -8 }}>{error}</p>}
+        <div className="flex justify-end gap-3 px-6 py-4" style={{ borderTop: "1px solid #E3E7EF" }}>
+          <button type="button" onClick={onClose} className="rounded-lg font-semibold" style={{ height: 36, paddingInline: 16, fontSize: 13, background: "#F3F4F6", color: "#374151" }}>Cancel</button>
+          <button
+            type="button"
+            className="rounded-lg font-semibold"
+            style={{ height: 36, paddingInline: 16, fontSize: 13, background: "#2FBEB3", color: "#FFFFFF" }}
+            onClick={() => {
+              if (!date || !time) {
+                setError("Date and time are required.");
+                return;
+              }
+              onSave(date, time);
+            }}
+          >
+            Save
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function FollowUps({ role }: { role: UserRole }) {
+  void role;
   const router = useRouter();
+  const [items, setItems] = useState<FollowUp[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [callLead, setCallLead] = useState<FollowUp | null>(null);
+  const [rescheduleLead, setRescheduleLead] = useState<FollowUp | null>(null);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const response = await fetch("/api/leads");
+        const result = await response.json() as { leads?: ApiLead[]; error?: string };
+        if (!response.ok) {
+          setError(result.error ?? "Unable to load follow-ups.");
+          return;
+        }
+        setItems((result.leads ?? []).map(toFollowUp).filter((lead): lead is FollowUp => lead !== null));
+      } catch {
+        setError("Unable to reach the server. Please refresh and try again.");
+      } finally {
+        setLoading(false);
+      }
+    };
+    void load();
+  }, []);
+
   const openLeadDetails = (lead: FollowUp) => router.push(`/leads/${lead.id}`);
 
-  const todays = ALL_FOLLOWUPS.filter((f) => f.urgency === "today").sort((a, b) => a.time.localeCompare(b.time));
-  const missed = ALL_FOLLOWUPS.filter((f) => f.urgency === "overdue").sort((a, b) => a.date.localeCompare(b.date));
-  const upcoming = ALL_FOLLOWUPS.filter((f) => f.urgency === "upcoming").sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  const patchFollowUp = async (leadId: string, followUpDate: string | null, followUpTime: string | null) => {
+    const response = await fetch(`/api/leads/${leadId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ followUpDate, followUpTime }),
+    });
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({})) as { error?: string };
+      throw new Error(result.error ?? "Unable to update the follow-up.");
+    }
+  };
+
+  const applySchedule = (leadId: string, date: string, time: string) => {
+    const isoDate = `${date}T00:00:00.000Z`;
+    const isoTime = `1970-01-01T${time}:00.000Z`;
+    const urgency = urgencyFor(isoDate);
+    const clock = timeParts(isoTime);
+    setItems((prev) => prev.flatMap((item) => {
+      if (item.id !== leadId) return [item];
+      if (urgency === "none" || urgency === "upcoming" && date > localDateKey(new Date(Date.now() + 7 * 86_400_000))) return [];
+      return [{
+        ...item,
+        date,
+        time: clock.sort,
+        timeLabel: clock.label,
+        urgency,
+        overdueLabel: urgency === "overdue" ? overdueLabel(date) : undefined,
+      }];
+    }));
+  };
+
+  const handleLogCall = async (data: LogCallForm) => {
+    if (!callLead || !data.outcome) return;
+    const response = await fetch("/api/activities", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        leadId: callLead.id,
+        outcome: data.outcome,
+        notes: data.notes,
+        followUpDate: data.followUpDate || undefined,
+        followUpTime: data.followUpTime || undefined,
+      }),
+    });
+    const result = await response.json().catch(() => ({})) as { error?: string; calls?: number };
+    if (!response.ok) throw new Error(result.error ?? "Unable to save the call log.");
+    const calls = result.calls ?? callLead.calls + 1;
+    const note = [outcomeLabel(data.outcome), data.notes].filter(Boolean).join(" — ");
+    setItems((prev) => prev.map((item) => item.id === callLead.id ? { ...item, calls, notes: note } : item));
+    if (data.followUpDate && data.followUpTime) {
+      applySchedule(callLead.id, data.followUpDate, data.followUpTime);
+    }
+    setError("");
+  };
+
+  const handleReschedule = async (date: string, time: string) => {
+    if (!rescheduleLead) return;
+    try {
+      await patchFollowUp(rescheduleLead.id, date, time);
+      applySchedule(rescheduleLead.id, date, time);
+      setRescheduleLead(null);
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to reschedule this follow-up.");
+    }
+  };
+
+  const handleMarkDone = async (lead: FollowUp) => {
+    try {
+      await patchFollowUp(lead.id, null, null);
+      setItems((prev) => prev.filter((item) => item.id !== lead.id));
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to complete this follow-up.");
+    }
+  };
+
+  const todays = items.filter((f) => f.urgency === "today").sort((a, b) => a.time.localeCompare(b.time));
+  const missed = items.filter((f) => f.urgency === "overdue").sort((a, b) => a.date.localeCompare(b.date));
+  const upcoming = items.filter((f) => f.urgency === "upcoming").sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
 
   // Group upcoming by date
   const upcomingByDate: Record<string, FollowUp[]> = {};
@@ -340,8 +594,18 @@ export function FollowUps({ role }: { role: UserRole }) {
   }
   const upcomingDates = Object.keys(upcomingByDate).sort();
 
+  const rowProps = (lead: FollowUp) => ({
+    lead,
+    onClick: () => openLeadDetails(lead),
+    onCall: () => setCallLead(lead),
+    onReschedule: () => setRescheduleLead(lead),
+    onMarkDone: () => { void handleMarkDone(lead); },
+  });
+
   return (
     <div style={{ padding: "24px 28px", display: "flex", flexDirection: "column", gap: 20, maxWidth: 1100 }}>
+      {loading && <p style={{ fontSize: 13, color: "#6B7280" }}>Loading follow-ups...</p>}
+      {error && <p style={{ fontSize: 13, color: "#DC2626" }}>{error}</p>}
 
       {/* ── Section 1: Today */}
       <SectionCard>
@@ -351,7 +615,7 @@ export function FollowUps({ role }: { role: UserRole }) {
         ) : (
           <div>
             {todays.map((lead) => (
-              <FollowUpRow key={lead.id} lead={lead} variant="today" onClick={() => openLeadDetails(lead)} />
+              <FollowUpRow key={lead.id} variant="today" {...rowProps(lead)} />
             ))}
           </div>
         )}
@@ -370,7 +634,7 @@ export function FollowUps({ role }: { role: UserRole }) {
         ) : (
           <div>
             {missed.map((lead) => (
-              <FollowUpRow key={lead.id} lead={lead} variant="overdue" onClick={() => openLeadDetails(lead)} />
+              <FollowUpRow key={lead.id} variant="overdue" {...rowProps(lead)} />
             ))}
           </div>
         )}
@@ -405,13 +669,28 @@ export function FollowUps({ role }: { role: UserRole }) {
                   </span>
                 </div>
                 {upcomingByDate[date].map((lead) => (
-                  <FollowUpRow key={lead.id} lead={lead} variant="upcoming" onClick={() => openLeadDetails(lead)} />
+                  <FollowUpRow key={lead.id} variant="upcoming" {...rowProps(lead)} />
                 ))}
               </div>
             ))}
           </div>
         )}
       </SectionCard>
+
+      {callLead && (
+        <LogCallModal
+          companyName={callLead.company}
+          onClose={() => setCallLead(null)}
+          onSave={(data) => { void handleLogCall(data); }}
+        />
+      )}
+      {rescheduleLead && (
+        <RescheduleModal
+          lead={rescheduleLead}
+          onClose={() => setRescheduleLead(null)}
+          onSave={(date, time) => { void handleReschedule(date, time); }}
+        />
+      )}
     </div>
   );
 }

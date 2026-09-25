@@ -2,8 +2,9 @@
 
 import { useState, useRef, useEffect, type ReactNode } from "react";
 import type { UserRole } from "@/lib/types";
+import { assigneeColor, initials } from "@/lib/lead-ui";
 import { LogCallModal, type LogCallForm } from "@/components/LogCallModal";
-import { LostReasonModal, type LostReason } from "@/components/LostReasonModal";
+import { LOST_REASON_OPTIONS, LostReasonModal, type LostReason } from "@/components/LostReasonModal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -20,7 +21,7 @@ type CallOutcome =
 
 interface ActivityEntry {
   id: string;
-  outcome: CallOutcome;
+  outcome: string;
   notes: string;
   loggedBy: string;
   timestamp: string;
@@ -54,7 +55,7 @@ interface LeadDetail {
   followUpTime: string;
   notes: string;
   customFields: CustomField[];
-  lastContacted: { outcome: CallOutcome; relativeTime: string; note: string };
+  lastContacted: { outcome: string; relativeTime: string; note: string } | null;
   activity: ActivityEntry[];
   lostReason?: LostReason;
 }
@@ -105,81 +106,81 @@ const ASSIGNEES = [
   { name: "Derek Kim", initials: "DK", color: "#F97316" },
 ];
 
-// ─── Mock lead data ───────────────────────────────────────────────────────────
+interface ApiLeadDetail {
+  id: string;
+  company: string;
+  niche: string;
+  contact: string;
+  phone: string;
+  source: string;
+  priority: Priority;
+  stage: string;
+  assigneeName: string;
+  proposalSent: boolean;
+  proposalSentDate: string | null;
+  followUpDate: string;
+  followUpTime: string;
+  notes: string;
+  lostReason: string | null;
+  customFields: CustomField[];
+  activities: { id: string; outcome: string; notes: string; loggedBy: string; createdAt: string }[];
+}
 
-const MOCK_LEAD: LeadDetail = {
-  id: "lead-001",
-  company: "Meridian Corp",
-  niche: "Enterprise SaaS",
-  contact: "Sarah Blake",
-  phone: "+1 555 340 9921",
-  source: "Referral",
-  priority: "hot",
-  stage: "Proposal Sent",
-  assignee: "James Carter",
-  assigneeInitials: "JC",
-  assigneeColor: "#2FBEB3",
-  proposalSent: true,
-  proposalSentAt: "Sep 12, 2026 · 3:14 PM",
-  followUpDate: "2026-09-15",
-  followUpTime: "15:30",
-  notes: "Sarah confirmed the budget is approved and the procurement team is involved. Push for a close this week — they have a competing offer from a smaller vendor. Emphasise onboarding speed and integration support.",
-  customFields: [
-    { id: "cf1", label: "Company Size",     type: "dropdown", value: "201–500",    options: ["1–10","11–50","51–200","201–500","500+"], dropdownColor: "#6366F1" },
-    { id: "cf2", label: "Annual Revenue",   type: "number",   value: "4200000" },
-    { id: "cf3", label: "Decision Date",    type: "date",     value: "2026-09-22" },
-    { id: "cf4", label: "NDA Signed",       type: "toggle",   value: true },
-    { id: "cf5", label: "Case Study Sent",  type: "toggle",   value: false },
-    { id: "cf6", label: "LinkedIn Profile", type: "link",     value: "https://linkedin.com/in/sarah-blake" },
-  ],
-  lastContacted: {
-    outcome: "proposal_discussed",
-    relativeTime: "2 days ago",
-    note: "Walked through the proposal, addressed pricing objections. She'll loop in their CTO.",
-  },
-  activity: [
-    {
-      id: "a1",
-      outcome: "proposal_discussed",
-      notes: "Walked through the proposal line-by-line. Sarah raised concerns about seat pricing — offered a volume discount. She will loop in CTO before Friday.",
-      loggedBy: "James Carter",
-      timestamp: "Sep 13, 2026 · 2:41 PM",
-      relativeTime: "2 days ago",
-    },
-    {
-      id: "a2",
-      outcome: "answered",
-      notes: "Confirmed budget approval of $42k. Decision team is Sarah + CTO + Procurement lead. Timeline: end of September.",
-      loggedBy: "James Carter",
-      timestamp: "Sep 10, 2026 · 11:05 AM",
-      relativeTime: "5 days ago",
-    },
-    {
-      id: "a3",
-      outcome: "callback_requested",
-      notes: "Sarah was in a meeting. Asked me to call back Thursday after 11am.",
-      loggedBy: "James Carter",
-      timestamp: "Sep 8, 2026 · 9:30 AM",
-      relativeTime: "7 days ago",
-    },
-    {
-      id: "a4",
-      outcome: "no_answer",
-      notes: "No answer — left a brief voicemail about the upcoming proposal.",
-      loggedBy: "Aisha Santos",
-      timestamp: "Sep 5, 2026 · 3:00 PM",
-      relativeTime: "10 days ago",
-    },
-    {
-      id: "a5",
-      outcome: "answered",
-      notes: "First conversation. Strong interest — they've been manually tracking leads in a spreadsheet. Booked a demo for the following week.",
-      loggedBy: "Aisha Santos",
-      timestamp: "Sep 2, 2026 · 10:15 AM",
-      relativeTime: "13 days ago",
-    },
-  ],
-};
+function relativeTime(iso: string) {
+  const minutes = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+  if (minutes < 1) return "Just now";
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  const days = Math.round(hours / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
+}
+
+function timestampLabel(iso: string) {
+  return new Date(iso).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function toLeadDetail(lead: ApiLeadDetail): LeadDetail {
+  const activity = lead.activities.map((entry) => ({
+    id: entry.id,
+    outcome: entry.outcome,
+    notes: entry.notes || "No additional notes.",
+    loggedBy: entry.loggedBy,
+    timestamp: timestampLabel(entry.createdAt),
+    relativeTime: relativeTime(entry.createdAt),
+  }));
+  const latest = activity[0];
+  return {
+    id: lead.id,
+    company: lead.company,
+    niche: lead.niche,
+    contact: lead.contact,
+    phone: lead.phone,
+    source: lead.source,
+    priority: lead.priority,
+    stage: lead.stage,
+    assignee: lead.assigneeName,
+    assigneeInitials: initials(lead.assigneeName),
+    assigneeColor: assigneeColor(lead.assigneeName),
+    proposalSent: lead.proposalSent,
+    proposalSentAt: lead.proposalSentDate ? timestampLabel(lead.proposalSentDate) : undefined,
+    followUpDate: lead.followUpDate,
+    followUpTime: lead.followUpTime,
+    notes: lead.notes,
+    customFields: lead.customFields,
+    lastContacted: latest
+      ? { outcome: latest.outcome, relativeTime: latest.relativeTime, note: latest.notes }
+      : null,
+    activity,
+    lostReason: LOST_REASON_OPTIONS.find((option) => option === lead.lostReason),
+  };
+}
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 
@@ -378,14 +379,31 @@ function DetailsTab({ lead, role, onLeadChange, onMarkDead }: { lead: LeadDetail
     setTimeout(() => setCopied(false), 1500);
   };
 
-  const handleLogCallSave = (data: LogCallForm) => {
+  const handleLogCallSave = async (data: LogCallForm) => {
     if (!data.outcome) return;
+    const response = await fetch("/api/activities", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        leadId: lead.id,
+        outcome: data.outcome,
+        notes: data.notes,
+        followUpDate: data.followUpDate || undefined,
+        followUpTime: data.followUpTime || undefined,
+      }),
+    });
+    const result = await response.json().catch(() => ({})) as {
+      id?: string;
+      loggedBy?: string;
+      error?: string;
+    };
+    if (!response.ok || !result.id) throw new Error(result.error ?? "Unable to save this call.");
 
     const entry: ActivityEntry = {
-      id: `a-${Date.now()}`,
+      id: result.id,
       outcome: data.outcome,
       notes: data.notes || "No additional notes.",
-      loggedBy: "James Carter",
+      loggedBy: result.loggedBy || "You",
       timestamp: "Just now",
       relativeTime: "Just now",
     };
@@ -584,13 +602,17 @@ function DetailsTab({ lead, role, onLeadChange, onMarkDead }: { lead: LeadDetail
 
         {/* Last Contacted */}
         <Card title="Last Contacted">
-          <div className="flex flex-col gap-2.5">
-            <div className="flex items-center justify-between">
-              <OutcomeBadge outcome={lead.lastContacted.outcome} />
-              <span style={{ fontSize: 11, color: "#9CA3AF" }}>{lead.lastContacted.relativeTime}</span>
+          {lead.lastContacted ? (
+            <div className="flex flex-col gap-2.5">
+              <div className="flex items-center justify-between">
+                <OutcomeBadge outcome={lead.lastContacted.outcome} />
+                <span style={{ fontSize: 11, color: "#9CA3AF" }}>{lead.lastContacted.relativeTime}</span>
+              </div>
+              <p style={{ fontSize: 13, color: "#374151", lineHeight: 1.6 }}>{lead.lastContacted.note}</p>
             </div>
-            <p style={{ fontSize: 13, color: "#374151", lineHeight: 1.6 }}>{lead.lastContacted.note}</p>
-          </div>
+          ) : (
+            <p style={{ fontSize: 13, color: "#9CA3AF" }}>No calls logged yet.</p>
+          )}
         </Card>
 
         {/* Next Stage hint */}
@@ -622,6 +644,14 @@ function DetailsTab({ lead, role, onLeadChange, onMarkDead }: { lead: LeadDetail
 // ─── Activity Tab ─────────────────────────────────────────────────────────────
 
 function ActivityTab({ lead }: { lead: LeadDetail }) {
+  if (lead.activity.length === 0) {
+    return (
+      <div style={{ padding: "20px 20px 32px" }}>
+        <p style={{ fontSize: 13, color: "#9CA3AF" }}>No calls logged yet.</p>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col" style={{ padding: "20px 20px 32px" }}>
       <div className="flex items-center justify-between mb-6">
@@ -637,7 +667,7 @@ function ActivityTab({ lead }: { lead: LeadDetail }) {
         />
 
         {lead.activity.map((entry, idx) => {
-          const meta = OUTCOME_META[entry.outcome];
+          const meta = OUTCOME_META[entry.outcome as CallOutcome] ?? { label: entry.outcome, bg: "#F1F5F9", color: "#64748B" };
           return (
             <div key={entry.id} className="relative flex flex-col gap-1.5 pb-7">
               {/* Timeline dot */}
@@ -690,8 +720,8 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function OutcomeBadge({ outcome }: { outcome: CallOutcome }) {
-  const m = OUTCOME_META[outcome];
+function OutcomeBadge({ outcome }: { outcome: string }) {
+  const m = OUTCOME_META[outcome as CallOutcome] ?? { label: outcome, bg: "#F1F5F9", color: "#64748B" };
   return (
     <span className="px-2.5 py-1 rounded-full text-xs font-semibold" style={{ background: m.bg, color: m.color }}>
       {m.label}
@@ -818,17 +848,43 @@ function DeleteLeadModal({ companyName, onCancel, onConfirm }: { companyName: st
 
 interface LeadDetailPanelProps {
   role: UserRole;
+  leadId: string;
   initialTab?: Tab;
   onClose?: () => void;
   onDelete?: (leadId: string, reason: string) => void;
 }
 
-export function LeadDetailPanel({ role, initialTab = "details", onClose, onDelete }: LeadDetailPanelProps) {
+export function LeadDetailPanel({ role, leadId, initialTab = "details", onClose, onDelete }: LeadDetailPanelProps) {
   const [tab, setTab] = useState<Tab>(initialTab);
-  const [lead, setLead] = useState<LeadDetail>(MOCK_LEAD);
+  const [lead, setLead] = useState<LeadDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [pendingLost, setPendingLost] = useState(false);
   const [pendingReassign, setPendingReassign] = useState(false);
   const [pendingDelete, setPendingDelete] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      setLoading(true);
+      setError("");
+      try {
+        const response = await fetch(`/api/leads/${leadId}`);
+        const result = await response.json() as { lead?: ApiLeadDetail; error?: string };
+        if (!response.ok || !result.lead) {
+          if (!cancelled) setError(result.error ?? "Unable to load lead.");
+          return;
+        }
+        if (!cancelled) setLead(toLeadDetail(result.lead));
+      } catch {
+        if (!cancelled) setError("Unable to load lead.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [leadId]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -844,13 +900,51 @@ export function LeadDetailPanel({ role, initialTab = "details", onClose, onDelet
     return () => document.removeEventListener("keydown", handler);
   }, [onClose, pendingLost]);
 
-  const applyStageChange = (newStage: string, lostReason?: LostReason) => {
-    setLead((prev) => ({
+  if (loading || !lead) {
+    return (
+      <>
+        {onClose && (
+          <div className="fixed inset-0 z-40" style={{ background: "rgba(15,27,60,0.4)" }} onClick={onClose} />
+        )}
+        <div className="fixed top-0 right-0 h-full z-50 flex flex-col" style={{ width: 720, background: "#FFFFFF", boxShadow: "-8px 0 40px rgba(15,27,60,0.14)" }}>
+          <div className="flex items-center gap-3 px-5 py-4" style={{ borderBottom: "1px solid #E3E7EF" }}>
+            {onClose && (
+              <button type="button" onClick={onClose} className="flex items-center justify-center rounded-lg shrink-0" style={{ width: 32, height: 32, color: "#6B7280", background: "#F3F4F6" }} aria-label="Close">
+                <XIcon size={14} />
+              </button>
+            )}
+            <p style={{ fontSize: 14, color: "#6B7280" }}>{loading ? "Loading lead..." : error || "Unable to load lead."}</p>
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  const applyStageChange = async (newStage: string, lostReason?: LostReason) => {
+    const previous = lead;
+    setLead((prev) => prev ? ({
       ...prev,
       stage: newStage,
       ...(newStage === "Closed Lost" && lostReason ? { lostReason } : {}),
       ...(newStage !== "Closed Lost" ? { lostReason: undefined } : {}),
-    }));
+    }) : prev);
+    try {
+      const response = await fetch("/api/leads", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: [lead.id], stage: newStage, lostReason }),
+      });
+      if (!response.ok) {
+        const result = await response.json().catch(() => ({})) as { error?: string };
+        setLead(previous);
+        setError(result.error ?? "Unable to update stage.");
+        return;
+      }
+      setError("");
+    } catch {
+      setLead(previous);
+      setError("Unable to update stage.");
+    }
   };
 
   const requestStageChange = (newStage: string) => {
@@ -862,12 +956,12 @@ export function LeadDetailPanel({ role, initialTab = "details", onClose, onDelet
   };
 
   const handleReassign = (assignee: (typeof ASSIGNEES)[number]) => {
-    setLead((prev) => ({
+    setLead((prev) => prev ? ({
       ...prev,
       assignee: assignee.name,
       assigneeInitials: assignee.initials,
       assigneeColor: assignee.color,
-    }));
+    }) : prev);
     setPendingReassign(false);
   };
 
@@ -971,6 +1065,7 @@ export function LeadDetailPanel({ role, initialTab = "details", onClose, onDelet
 
         {/* ── Scrollable body */}
         <div className="flex-1 overflow-y-auto" style={{ background: "#F9FAFB" }}>
+          {error && <p style={{ padding: "12px 20px 0", fontSize: 13, color: "#DC2626" }}>{error}</p>}
           {tab === "details" && <DetailsTab lead={lead} role={role} onLeadChange={setLead} onMarkDead={() => requestStageChange("Dead Lead")} />}
           {tab === "activity" && <ActivityTab lead={lead} />}
         </div>

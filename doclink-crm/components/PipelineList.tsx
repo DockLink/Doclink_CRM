@@ -694,7 +694,10 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
                 return (
                   <tr
                     key={lead.id}
-                    style={style}
+                    style={{ ...style, cursor: "pointer" }}
+                    onClick={() => router.push(`/leads/${lead.id}`)}
+                    onKeyDown={(e) => { if (e.key === "Enter") router.push(`/leads/${lead.id}`); }}
+                    tabIndex={0}
                     onMouseEnter={(e) => {
                       if (!isSel) (e.currentTarget as HTMLTableRowElement).style.background =
                         lead.stale ? "#E8EEF4" : lead.urgency === "overdue" ? "#FEF2F2" : "#E3F7F5";
@@ -721,7 +724,7 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
                       )}
                       {role === "superadmin" && (
                         <div
-                          onClick={() => toggleRow(lead.id)}
+                          onClick={(event) => { event.stopPropagation(); toggleRow(lead.id); }}
                           className="w-4 h-4 rounded flex items-center justify-center cursor-pointer"
                           style={{ border: `1.5px solid ${isSel ? "#2FBEB3" : "#D1D5DB"}`, background: isSel ? "#2FBEB3" : "#FFFFFF", margin: "0 auto" }}
                         >
@@ -737,13 +740,7 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
 
                     {/* Company */}
                     <td style={{ padding: "0 12px" }}>
-                      <div
-                        className="flex items-center gap-1.5 min-w-0 cursor-pointer"
-                        onClick={() => router.push(`/leads/${lead.id}`)}
-                        role="link"
-                        tabIndex={0}
-                        onKeyDown={(e) => { if (e.key === "Enter") router.push(`/leads/${lead.id}`); }}
-                      >
+                      <div className="flex items-center gap-1.5 min-w-0">
                         {lead.stale && (
                           <div className="w-2 h-2 rounded-full shrink-0" style={{ background: "#94A3B8" }} title="No activity" />
                         )}

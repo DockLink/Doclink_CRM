@@ -206,7 +206,7 @@ interface LogCallModalProps {
   companyName?: string;
   initialOutcome?: Outcome;
   onClose?: () => void;
-  onSave?: (data: LogCallForm) => void;
+  onSave?: (data: LogCallForm) => void | Promise<void>;
 }
 
 export function LogCallModal({
@@ -222,6 +222,7 @@ export function LogCallModal({
     followUpTime: "",
   });
   const [submitted, setSubmitted] = useState(false);
+  const [saveError, setSaveError] = useState("");
 
   const requiresFollowUp = form.outcome && REQUIRES_FOLLOWUP.has(form.outcome);
   const outcomeError = submitted && !form.outcome;
@@ -234,12 +235,17 @@ export function LogCallModal({
     return () => document.removeEventListener("keydown", handler);
   }, [onClose]);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     setSubmitted(true);
+    setSaveError("");
     if (!form.outcome) return;
     if (requiresFollowUp && (!form.followUpDate || !form.followUpTime)) return;
-    onSave?.(form);
-    onClose?.();
+    try {
+      await onSave?.(form);
+      onClose?.();
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Unable to save this call.");
+    }
   };
 
   return (
@@ -419,6 +425,7 @@ export function LogCallModal({
           className="flex items-center justify-end gap-3 px-6 py-4 shrink-0"
           style={{ borderTop: "1px solid #E3E7EF" }}
         >
+          {saveError && <span className="mr-auto" style={{ fontSize: 12, color: "#DC2626" }}>{saveError}</span>}
           <button
             type="button"
             onClick={onClose}

@@ -32,6 +32,7 @@ function serializeLead(lead: {
   createdAt: Date;
   stageChangedAt: Date | null;
   _count: { activities: number };
+  activities: { outcome: string; notes: string | null }[];
 }) {
   return {
     id: lead.id,
@@ -46,6 +47,8 @@ function serializeLead(lead: {
     assigneeName: lead.assignee.name,
     source: lead.source?.name ?? "",
     calls: lead._count.activities,
+    lastOutcome: lead.activities[0]?.outcome ?? "",
+    lastNotes: lead.activities[0]?.notes ?? "",
     createdAt: lead.createdAt.toISOString(),
     stageChangedAt: lead.stageChangedAt?.toISOString() ?? null,
   };
@@ -62,6 +65,7 @@ export async function GET() {
       assignee: { select: { name: true } },
       source: { select: { name: true } },
       _count: { select: { activities: true } },
+      activities: { orderBy: { createdAt: "desc" }, take: 1, select: { outcome: true, notes: true } },
     },
   });
   return NextResponse.json({ leads: leads.map(serializeLead) });

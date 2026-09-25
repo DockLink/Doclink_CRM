@@ -14,6 +14,8 @@ export interface ApiLead {
   assigneeName: string;
   source: string;
   calls: number;
+  lastOutcome?: string;
+  lastNotes?: string;
   createdAt: string;
   stageChangedAt: string | null;
 }
