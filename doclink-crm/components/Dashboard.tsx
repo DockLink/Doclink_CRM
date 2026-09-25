@@ -4,76 +4,40 @@ import type { CSSProperties, ReactNode } from "react";
 import type { UserRole } from "@/lib/types";
 import { stageColor } from "@/lib/pipeline-stages";
 import { usePipelineStages } from "@/lib/use-pipeline-stages";
-import { LOST_REASON_OPTIONS } from "@/components/LostReasonModal";
+import {
+  useDashboardData,
+  type DashboardFollowUp,
+  type DashboardStageHealth,
+  type DashboardTeamMember,
+  type DashboardLostReason,
+} from "@/lib/use-dashboard-data";
 
-// ─── Palette constants ─────────────────────────────────────────────────────────
+// ─── Date/time formatting helpers ──────────────────────────────────────────
 
-const PIPELINE_DATA = [
-  { stage: "New Lead",       count: 142, pct: 21 },
-  { stage: "No Answer",      count: 87,  pct: 13 },
-  { stage: "Try Again",      count: 63,  pct: 9  },
-  { stage: "Conversation",   count: 94,  pct: 14 },
-  { stage: "Proposal Sent",  count: 71,  pct: 11 },
-  { stage: "Estimate Sent",  count: 45,  pct: 7  },
-  { stage: "Meeting Booked", count: 38,  pct: 6  },
-  { stage: "Closed Won",     count: 112, pct: 17 },
-  { stage: "Closed Lost",    count: 42,  pct: 6  },
-  { stage: "Dead Lead",      count: 21,  pct: 3  },
-];
+function fmtTime(time: string | null) {
+  if (!time) return "—";
+  const d = new Date(time);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+}
 
-const AVG_DAYS = [
-  { stage: "New Lead",       days: 1.2 },
-  { stage: "No Answer",      days: 3.8 },
-  { stage: "Try Again",      days: 2.9 },
-  { stage: "Conversation",   days: 5.1 },
-  { stage: "Proposal Sent",  days: 8.4 },
-  { stage: "Estimate Sent",  days: 6.2 },
-  { stage: "Meeting Booked", days: 4.2 },
-  { stage: "Closed Won",     days: 12.6 },
-  { stage: "Closed Lost",    days: 9.3 },
-  { stage: "Dead Lead",      days: 6.7 },
-];
+function fmtRelativeDay(dateStr: string | null) {
+  if (!dateStr) return "—";
+  const target = new Date(dateStr);
+  if (Number.isNaN(target.getTime())) return "—";
+  target.setHours(0, 0, 0, 0);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const diffDays = Math.round((target.getTime() - today.getTime()) / 86_400_000);
+  if (diffDays === 0) return "Today";
+  if (diffDays === 1) return "Tomorrow";
+  if (diffDays === -1) return "Yesterday";
+  if (diffDays < 0) return target.toLocaleDateString("en-GB", { weekday: "short" });
+  if (diffDays <= 6) return target.toLocaleDateString("en-GB", { weekday: "short" });
+  return target.toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
+}
 
-const TODAY_FOLLOWUPS = [
-  { time: "09:00", company: "Meridian Corp", contact: "Sarah Blake",   stage: "Proposal Sent" },
-  { time: "10:30", company: "Vanguard Tech",  contact: "Raj Patel",    stage: "Meeting Booked" },
-  { time: "11:45", company: "Solaris Group",  contact: "Emma Novak",   stage: "Conversation" },
-  { time: "14:00", company: "Apex Industries",contact: "Derek Owens",  stage: "No Answer" },
-  { time: "15:30", company: "Orion Partners", contact: "Julia Chen",   stage: "Try Again" },
-];
-
-const MISSED_FOLLOWUPS = [
-  { time: "Yesterday 16:00", company: "Nexus Digital",  contact: "Tom Brennan",  stage: "Proposal Sent" },
-  { time: "Yesterday 11:00", company: "Crestline Labs", contact: "Priya Singh",  stage: "Conversation" },
-  { time: "Mon 09:30",       company: "Atlas Holdings", contact: "Carlos Ruiz",  stage: "Meeting Booked" },
-];
-
-const UPCOMING_FOLLOWUPS = [
-  { time: "Tomorrow",  company: "Pinnacle Health", contact: "Diane Yuen",    stage: "Conversation" },
-  { time: "Wed 10:00", company: "Redwood Capital", contact: "Marcus Webb",   stage: "Proposal Sent" },
-  { time: "Thu 14:30", company: "Summit Partners", contact: "Keiko Tanaka",  stage: "New Lead" },
-  { time: "Fri 09:00", company: "Crestview Corp",  contact: "Liam O'Brien",  stage: "No Answer" },
-];
-
-const TEAM_DATA = [
-  { initials: "JC", name: "James Carter",  callsToday: 14, callsWeek: 61, updatedToday: 8,  convRate: 34 },
-  { initials: "AS", name: "Aisha Santos",  callsToday: 11, callsWeek: 54, updatedToday: 6,  convRate: 29 },
-  { initials: "MR", name: "Marco Rivera",  callsToday: 9,  callsWeek: 47, updatedToday: 5,  convRate: 22 },
-  { initials: "NW", name: "Natalie Wong",  callsToday: 12, callsWeek: 58, updatedToday: 9,  convRate: 38 },
-  { initials: "DK", name: "Derek Kim",     callsToday: 7,  callsWeek: 39, updatedToday: 4,  convRate: 19 },
-];
-
-// Demo counts aligned with LOST_REASON_OPTIONS — live feeds replace these later
-const LOST_REASONS = [
-  { reason: LOST_REASON_OPTIONS[0], count: 34 },
-  { reason: LOST_REASON_OPTIONS[1], count: 28 },
-  { reason: LOST_REASON_OPTIONS[2], count: 19 },
-  { reason: LOST_REASON_OPTIONS[3], count: 14 },
-  { reason: LOST_REASON_OPTIONS[4], count: 11 },
-  { reason: LOST_REASON_OPTIONS[5], count: 8  },
-];
-
-// ─── Shared small components ───────────────────────────────────────────────────
+// ─── Shared small components ───────────────────────────────────────────────
 
 function StagePill({ stage }: { stage: string }) {
   const { stages } = usePipelineStages();
@@ -131,9 +95,13 @@ function ViewAllLink() {
   );
 }
 
+function EmptyRow({ label }: { label: string }) {
+  return <div style={{ fontSize: 12, color: "#9CA3AF", padding: "12px 0" }}>{label}</div>;
+}
+
 // ─── Section 1: Follow-up summary ─────────────────────────────────────────────
 
-function TodayFollowupsCard() {
+function TodayFollowupsCard({ items }: { items: DashboardFollowUp[] }) {
   return (
     <Card style={{ padding: "16px 20px", flex: 1, minWidth: 0 }}>
       <div className="flex items-center justify-between mb-3">
@@ -141,8 +109,9 @@ function TodayFollowupsCard() {
         <ViewAllLink />
       </div>
       <div className="flex flex-col">
-        {TODAY_FOLLOWUPS.map(({ time, company, contact, stage }) => (
-          <div key={time + company}
+        {items.length === 0 && <EmptyRow label="No follow-ups scheduled for today." />}
+        {items.map((item) => (
+          <div key={item.id}
             className="flex items-center gap-3 py-2.5 transition-colors"
             style={{ borderTop: "1px solid #F3F4F6", cursor: "default" }}
             onMouseEnter={(e) => ((e.currentTarget as HTMLDivElement).style.background = "#F9FAFB")}
@@ -152,13 +121,13 @@ function TodayFollowupsCard() {
               className="shrink-0 px-1.5 py-0.5 rounded"
               style={{ fontSize: 11, fontWeight: 600, color: "#B45309", background: "#FEF3C7", minWidth: 44, textAlign: "center" }}
             >
-              {time}
+              {fmtTime(item.followUpTime)}
             </span>
             <div className="flex-1 min-w-0">
-              <div style={{ fontSize: 13, fontWeight: 500, color: "#111111" }} className="truncate">{company}</div>
-              <div style={{ fontSize: 11, color: "#9CA3AF" }}>{contact}</div>
+              <div style={{ fontSize: 13, fontWeight: 500, color: "#111111" }} className="truncate">{item.company}</div>
+              <div style={{ fontSize: 11, color: "#9CA3AF" }}>{item.contact}</div>
             </div>
-            <StagePill stage={stage} />
+            <StagePill stage={item.stage} />
           </div>
         ))}
       </div>
@@ -166,7 +135,7 @@ function TodayFollowupsCard() {
   );
 }
 
-function MissedFollowupsCard() {
+function MissedFollowupsCard({ items }: { items: DashboardFollowUp[] }) {
   return (
     <Card
       style={{ padding: "16px 20px", flex: 1, minWidth: 0, borderLeft: "3px solid #DC2626" }}
@@ -176,8 +145,9 @@ function MissedFollowupsCard() {
         <ViewAllLink />
       </div>
       <div className="flex flex-col">
-        {MISSED_FOLLOWUPS.map(({ time, company, contact, stage }) => (
-          <div key={time + company}
+        {items.length === 0 && <EmptyRow label="No missed follow-ups." />}
+        {items.map((item) => (
+          <div key={item.id}
             className="flex items-center gap-3 py-2.5 transition-colors"
             style={{ borderTop: "1px solid #F3F4F6" }}
             onMouseEnter={(e) => ((e.currentTarget as HTMLDivElement).style.background = "#FFF8F8")}
@@ -187,24 +157,28 @@ function MissedFollowupsCard() {
               className="shrink-0 px-1.5 py-0.5 rounded"
               style={{ fontSize: 11, fontWeight: 600, color: "#DC2626", background: "#FEF2F2", minWidth: 44, textAlign: "center" }}
             >
-              {time.split(" ")[0]}
+              {fmtRelativeDay(item.followUpDate)}
             </span>
             <div className="flex-1 min-w-0">
-              <div style={{ fontSize: 13, fontWeight: 500, color: "#111111" }} className="truncate">{company}</div>
-              <div style={{ fontSize: 11, color: "#9CA3AF" }}>{contact}</div>
+              <div style={{ fontSize: 13, fontWeight: 500, color: "#111111" }} className="truncate">{item.company}</div>
+              <div style={{ fontSize: 11, color: "#9CA3AF" }}>{item.contact}</div>
             </div>
-            <StagePill stage={stage} />
+            <StagePill stage={item.stage} />
           </div>
         ))}
       </div>
-      <div className="mt-3 pt-3" style={{ borderTop: "1px solid #F3F4F6" }}>
-        <div style={{ fontSize: 12, color: "#DC2626", fontWeight: 500 }}>3 overdue — action required</div>
-      </div>
+      {items.length > 0 && (
+        <div className="mt-3 pt-3" style={{ borderTop: "1px solid #F3F4F6" }}>
+          <div style={{ fontSize: 12, color: "#DC2626", fontWeight: 500 }}>
+            {items.length} overdue — action required
+          </div>
+        </div>
+      )}
     </Card>
   );
 }
 
-function UpcomingFollowupsCard() {
+function UpcomingFollowupsCard({ items }: { items: DashboardFollowUp[] }) {
   return (
     <Card style={{ padding: "16px 20px", flex: 1, minWidth: 0 }}>
       <div className="flex items-center justify-between mb-3">
@@ -214,8 +188,9 @@ function UpcomingFollowupsCard() {
         <ViewAllLink />
       </div>
       <div className="flex flex-col">
-        {UPCOMING_FOLLOWUPS.map(({ time, company, contact, stage }) => (
-          <div key={time + company}
+        {items.length === 0 && <EmptyRow label="Nothing coming up in the next 7 days." />}
+        {items.map((item) => (
+          <div key={item.id}
             className="flex items-center gap-3 py-2.5 transition-colors"
             style={{ borderTop: "1px solid #F3F4F6" }}
             onMouseEnter={(e) => ((e.currentTarget as HTMLDivElement).style.background = "#E3F7F5")}
@@ -225,13 +200,13 @@ function UpcomingFollowupsCard() {
               className="shrink-0 px-1.5 py-0.5 rounded"
               style={{ fontSize: 11, fontWeight: 500, color: "#0E7A70", background: "#E3F7F5", minWidth: 44, textAlign: "center" }}
             >
-              {time.split(" ")[0]}
+              {fmtRelativeDay(item.followUpDate)}
             </span>
             <div className="flex-1 min-w-0">
-              <div style={{ fontSize: 13, fontWeight: 500, color: "#111111" }} className="truncate">{company}</div>
-              <div style={{ fontSize: 11, color: "#9CA3AF" }}>{contact}</div>
+              <div style={{ fontSize: 13, fontWeight: 500, color: "#111111" }} className="truncate">{item.company}</div>
+              <div style={{ fontSize: 11, color: "#9CA3AF" }}>{item.contact}</div>
             </div>
-            <StagePill stage={stage} />
+            <StagePill stage={item.stage} />
           </div>
         ))}
       </div>
@@ -258,45 +233,21 @@ function WinRateRing({ pct }: { pct: number }) {
   );
 }
 
-const KPI_CARDS = [
-  {
-    label: "Total Leads",           value: "670", sub: "+48 this month",          accent: "#2FBEB3",
-    numColor: "#111111",
-  },
-  {
-    label: "Closed Won",            value: "112", sub: "16.7% of pipeline",       accent: "#16A34A",
-    numColor: "#16A34A",
-  },
-  {
-    label: "Closed Lost",           value: "42",  sub: "6.3% of pipeline",        accent: "#57534E",
-    numColor: "#57534E",
-  },
-  {
-    label: "Dead Leads",            value: "21",  sub: "Removed from pipeline",   accent: "#DC2626",
-    numColor: "#DC2626",
-  },
-  {
-    label: "Win Rate",              value: null,  sub: "vs. 29% last month",      accent: "#2FBEB3",
-    numColor: "#111111", ring: 34,
-  },
-  {
-    label: "Leads — No Activity",   value: "88",  sub: "No update in 14+ days",   accent: "#94A3B8",
-    numColor: "#94A3B8",
-  },
-  {
-    label: "Leads-No Status Update", value: "54",  sub: "Stage unchanged 7+ days", accent: "#94A3B8",
-    numColor: "#94A3B8",
-  },
-  {
-    label: "Missed Follow-ups",     value: "3",   sub: "Action required today",   accent: "#DC2626",
-    numColor: "#DC2626",
-  },
-];
+function KPISection({ kpis }: { kpis: NonNullable<ReturnType<typeof useDashboardData>["data"]>["kpis"] }) {
+  const cards = [
+    { label: "Total Leads", value: String(kpis.totalLeads), sub: "All leads in view", accent: "#2FBEB3", numColor: "#111111" },
+    { label: "Closed Won", value: String(kpis.closedWon), sub: `${kpis.totalLeads > 0 ? Math.round((kpis.closedWon / kpis.totalLeads) * 100) : 0}% of pipeline`, accent: "#16A34A", numColor: "#16A34A" },
+    { label: "Closed Lost", value: String(kpis.closedLost), sub: `${kpis.totalLeads > 0 ? Math.round((kpis.closedLost / kpis.totalLeads) * 100) : 0}% of pipeline`, accent: "#57534E", numColor: "#57534E" },
+    { label: "Dead Leads", value: String(kpis.deadLeads), sub: "Removed from pipeline", accent: "#DC2626", numColor: "#DC2626" },
+    { label: "Win Rate", value: null, sub: "Closed Won vs Closed Lost", accent: "#2FBEB3", numColor: "#111111", ring: kpis.winRate },
+    { label: "Leads — No Activity", value: String(kpis.noActivityCount), sub: "No update in 14+ days", accent: "#94A3B8", numColor: "#94A3B8" },
+    { label: "Leads — No Status Update", value: String(kpis.noStatusUpdateCount), sub: "Stage unchanged 7+ days", accent: "#94A3B8", numColor: "#94A3B8" },
+    { label: "Missed Follow-ups", value: String(kpis.missedFollowUpsCount), sub: "Action required", accent: "#DC2626", numColor: "#DC2626" },
+  ];
 
-function KPISection() {
   return (
     <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-      {KPI_CARDS.map(({ label, value, sub, accent, numColor, ring }) => (
+      {cards.map(({ label, value, sub, accent, numColor, ring }) => (
         <Card key={label} accentColor={accent} style={{ padding: "16px 20px" }}>
           <div style={{ fontSize: 12, fontWeight: 500, color: "#6B7280", marginBottom: 8 }}>{label}</div>
           {ring !== undefined ? (
@@ -318,9 +269,17 @@ function KPISection() {
 
 // ─── Section 3: Pipeline health ────────────────────────────────────────────────
 
-function PipelineHealthCard() {
-  const { stages } = usePipelineStages();
-  const maxDays = Math.max(...AVG_DAYS.map((d) => d.days));
+function PipelineHealthCard({
+  stages,
+  totalLeads,
+  overdueCount,
+}: {
+  stages: DashboardStageHealth[];
+  totalLeads: number;
+  overdueCount: number;
+}) {
+  const { stages: stageColors } = usePipelineStages();
+  const maxDays = Math.max(1, ...stages.map((s) => s.avgDays));
 
   return (
     <Card style={{ padding: "20px 24px" }}>
@@ -330,7 +289,7 @@ function PipelineHealthCard() {
           className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg"
           style={{ background: "#FEF2F2", border: "1px solid #FCA5A5" }}
         >
-          <span style={{ fontSize: 18, fontWeight: 700, color: "#DC2626" }}>17</span>
+          <span style={{ fontSize: 18, fontWeight: 700, color: "#DC2626" }}>{overdueCount}</span>
           <span style={{ fontSize: 11, color: "#DC2626", fontWeight: 500 }}>overdue leads</span>
         </div>
       </div>
@@ -338,28 +297,28 @@ function PipelineHealthCard() {
       {/* Stacked bar */}
       <div>
         <div style={{ fontSize: 11, fontWeight: 500, color: "#9CA3AF", marginBottom: 6 }}>
-          670 total leads — by pipeline stage
+          {totalLeads} total leads — by pipeline stage
         </div>
         <div className="flex rounded-lg overflow-hidden" style={{ height: 28 }}>
-          {PIPELINE_DATA.map(({ stage, pct }) => (
+          {stages.map(({ stage, pct }) => (
             <div
               key={stage}
               title={`${stage}: ${pct}%`}
               className="transition-opacity hover:opacity-80"
-              style={{ width: `${pct}%`, background: stageColor(stages, stage), minWidth: pct > 0 ? 2 : 0 }}
+              style={{ width: `${pct}%`, background: stageColor(stageColors, stage), minWidth: pct > 0 ? 2 : 0 }}
             />
           ))}
         </div>
 
         {/* Legend */}
         <div className="flex flex-wrap gap-x-4 gap-y-2 mt-4">
-          {PIPELINE_DATA.map(({ stage, count }) => (
+          {stages.map(({ stage, count }) => (
             <div key={stage} className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: stageColor(stages, stage) }} />
+              <div className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: stageColor(stageColors, stage) }} />
               <span style={{ fontSize: 11, color: "#6B7280" }}>{stage}</span>
               <span
                 className="px-1.5 py-0.5 rounded-full text-white"
-                style={{ fontSize: 10, fontWeight: 600, background: stageColor(stages, stage) }}
+                style={{ fontSize: 10, fontWeight: 600, background: stageColor(stageColors, stage) }}
               >
                 {count}
               </span>
@@ -368,20 +327,20 @@ function PipelineHealthCard() {
         </div>
       </div>
 
-      {/* Avg days per stage */}
+      {/* Avg days per stage (dwell time of leads currently in each stage) */}
       <div className="mt-6 pt-5" style={{ borderTop: "1px solid #F3F4F6" }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: "#6B7280", marginBottom: 10 }}>Avg. Days per Stage</div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: "#6B7280", marginBottom: 10 }}>Avg. Days in Current Stage</div>
         <div className="flex flex-col gap-2.5">
-          {AVG_DAYS.map(({ stage, days }) => (
+          {stages.map(({ stage, avgDays }) => (
             <div key={stage} className="flex items-center gap-3">
               <div style={{ fontSize: 12, color: "#6B7280", width: 120 }} className="shrink-0">{stage}</div>
               <div className="flex-1 h-1.5 rounded-full" style={{ background: "#F3F4F6" }}>
                 <div
                   className="h-full rounded-full transition-all"
-                  style={{ width: `${(days / maxDays) * 100}%`, background: stageColor(stages, stage) }}
+                  style={{ width: `${(avgDays / maxDays) * 100}%`, background: stageColor(stageColors, stage) }}
                 />
               </div>
-              <div style={{ fontSize: 12, fontWeight: 500, color: "#111111", width: 40, textAlign: "right" }}>{days}d</div>
+              <div style={{ fontSize: 12, fontWeight: 500, color: "#111111", width: 40, textAlign: "right" }}>{avgDays}d</div>
             </div>
           ))}
         </div>
@@ -394,7 +353,7 @@ function PipelineHealthCard() {
 
 const AVATAR_COLORS = ["#2FBEB3", "#6366F1", "#F59E0B", "#16A34A", "#F97316"];
 
-function TeamActivityCard() {
+function TeamActivityCard({ team }: { team: DashboardTeamMember[] }) {
   return (
     <Card style={{ overflow: "hidden" }}>
       <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: "1px solid #E5E7EB" }}>
@@ -414,9 +373,9 @@ function TeamActivityCard() {
           </tr>
         </thead>
         <tbody>
-          {TEAM_DATA.map(({ initials, name, callsToday, callsWeek, updatedToday, convRate }, i) => (
+          {team.map(({ id, initials, name, callsToday, callsWeek, updatedToday, convRate }, i) => (
             <tr
-              key={name}
+              key={id}
               style={{ borderBottom: "1px solid #F3F4F6", height: 48 }}
               onMouseEnter={(e) => ((e.currentTarget as HTMLTableRowElement).style.background = "#E3F7F5")}
               onMouseLeave={(e) => ((e.currentTarget as HTMLTableRowElement).style.background = "transparent")}
@@ -453,35 +412,83 @@ function TeamActivityCard() {
 
 // ─── Section 5: Lost reason analysis ──────────────────────────────────────────
 
-function LostReasonCard() {
-  const max = LOST_REASONS[0].count;
+function LostReasonCard({ reasons }: { reasons: DashboardLostReason[] }) {
+  const total = reasons.reduce((sum, r) => sum + r.count, 0);
+  const max = Math.max(1, ...reasons.map((r) => r.count));
+  const top = reasons[0];
+
   return (
-    <Card style={{ padding: "20px 24px", flex: 1 }}>
-      <div className="flex items-center justify-between mb-5">
-        <h3 style={{ fontSize: 15, fontWeight: 600, color: "#111111" }}>Lost Reason Analysis</h3>
-        <span style={{ fontSize: 11, color: "#9CA3AF" }}>42 total closed-lost</span>
-      </div>
-      <div className="flex flex-col gap-3">
-        {LOST_REASONS.map(({ reason, count }) => (
-          <div key={reason} className="flex items-center gap-3">
-            <div style={{ fontSize: 12, color: "#6B7280", width: 200 }} className="shrink-0 truncate">{reason}</div>
-            <div className="flex-1 h-5 rounded flex items-center overflow-hidden" style={{ background: "#F1F5F9" }}>
-              <div
-                className="h-full rounded transition-all"
-                style={{ width: `${(count / max) * 100}%`, background: "#57534E", minWidth: 4 }}
-              />
+    <div className="flex gap-4" style={{ flex: 1 }}>
+      <Card style={{ padding: "20px 24px", flex: 1 }}>
+        <div className="flex items-center justify-between mb-5">
+          <h3 style={{ fontSize: 15, fontWeight: 600, color: "#111111" }}>Lost Reason Analysis</h3>
+          <span style={{ fontSize: 11, color: "#9CA3AF" }}>{total} total closed-lost</span>
+        </div>
+        <div className="flex flex-col gap-3">
+          {reasons.length === 0 && <EmptyRow label="No closed-lost leads yet." />}
+          {reasons.map(({ reason, count }) => (
+            <div key={reason} className="flex items-center gap-3">
+              <div style={{ fontSize: 12, color: "#6B7280", width: 200 }} className="shrink-0 truncate">{reason}</div>
+              <div className="flex-1 h-5 rounded flex items-center overflow-hidden" style={{ background: "#F1F5F9" }}>
+                <div
+                  className="h-full rounded transition-all"
+                  style={{ width: `${(count / max) * 100}%`, background: "#57534E", minWidth: 4 }}
+                />
+              </div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: "#57534E", width: 24, textAlign: "right" }}>{count}</div>
             </div>
-            <div style={{ fontSize: 12, fontWeight: 600, color: "#57534E", width: 24, textAlign: "right" }}>{count}</div>
+          ))}
+        </div>
+      </Card>
+
+      <Card style={{ flex: 1, padding: "20px 24px", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", gap: 8 }}>
+        <div style={{ fontSize: 32, fontWeight: 700, color: "#57534E" }}>{total}</div>
+        <div style={{ fontSize: 13, fontWeight: 500, color: "#6B7280" }}>Total Closed Lost</div>
+        {top && (
+          <div className="mt-4 w-full" style={{ borderTop: "1px solid #E5E7EB", paddingTop: 16 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "#9CA3AF", marginBottom: 8 }}>TOP REASON</div>
+            <div style={{ fontSize: 14, fontWeight: 500, color: "#57534E" }}>{top.reason}</div>
+            <div style={{ fontSize: 12, color: "#9CA3AF" }}>
+              {top.count} leads ({total > 0 ? Math.round((top.count / total) * 100) : 0}% of closed-lost)
+            </div>
           </div>
-        ))}
-      </div>
-    </Card>
+        )}
+      </Card>
+    </div>
   );
 }
 
 // ─── Dashboard root ────────────────────────────────────────────────────────────
 
 export function Dashboard({ role }: { role: UserRole }) {
+  const { data, loading, error, reload } = useDashboardData();
+
+  if (loading && !data) {
+    return <div style={{ padding: 24, fontSize: 13, color: "#6B7280" }}>Loading dashboard…</div>;
+  }
+
+  if (error) {
+    return (
+      <div style={{ padding: 24 }}>
+        <div style={{ fontSize: 13, color: "#DC2626", marginBottom: 12 }}>{error}</div>
+        <button
+          type="button"
+          onClick={() => void reload()}
+          className="rounded-lg font-semibold"
+          style={{ height: 34, paddingInline: 14, fontSize: 12, color: "#FFFFFF", background: "#57534E" }}
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  if (!data) return null;
+
+  // `role` prop lets a superadmin preview the admin view client-side; the API
+  // always enforces real scoping/permissions server-side regardless of this.
+  const showSuperadminSections = role === "superadmin";
+
   return (
     <div style={{ padding: 24 }}>
       {/* Role badge */}
@@ -499,7 +506,7 @@ export function Dashboard({ role }: { role: UserRole }) {
           >
             {role === "superadmin" ? "Superadmin" : "Admin"}
           </span>
-          {role !== "superadmin" && (
+          {!showSuperadminSections && (
             <span style={{ fontSize: 11, color: "#9CA3AF" }}>— Sections 4 &amp; 5 hidden</span>
           )}
         </div>
@@ -509,50 +516,39 @@ export function Dashboard({ role }: { role: UserRole }) {
       <div className="mb-6">
         <SectionLabel>Follow-up Summary</SectionLabel>
         <div className="flex gap-4">
-          <TodayFollowupsCard />
-          <MissedFollowupsCard />
-          <UpcomingFollowupsCard />
+          <TodayFollowupsCard items={data.followUps.today} />
+          <MissedFollowupsCard items={data.followUps.missed} />
+          <UpcomingFollowupsCard items={data.followUps.upcoming} />
         </div>
       </div>
 
       {/* Section 2 — KPIs */}
       <div className="mb-6">
         <SectionLabel>Sales Performance</SectionLabel>
-        <KPISection />
+        <KPISection kpis={data.kpis} />
       </div>
 
       {/* Section 3 — Pipeline health */}
       <div className="mb-6">
         <SectionLabel>Pipeline Health</SectionLabel>
-        <PipelineHealthCard />
+        <PipelineHealthCard
+          stages={data.pipelineHealth.stages}
+          totalLeads={data.pipelineHealth.totalLeads}
+          overdueCount={data.pipelineHealth.overdueCount}
+        />
       </div>
 
       {/* Sections 4 & 5 — Superadmin only */}
-      {role === "superadmin" && (
+      {showSuperadminSections && data.teamActivity && data.lostReasons && (
         <>
           <div className="mb-6">
             <SectionLabel>Team Activity</SectionLabel>
-            <TeamActivityCard />
+            <TeamActivityCard team={data.teamActivity} />
           </div>
 
           <div className="mb-6">
             <SectionLabel>Lost Reason Analysis</SectionLabel>
-            <div className="flex gap-4">
-              <LostReasonCard />
-              {/* Spacer card for layout balance */}
-              <Card style={{ flex: 1, padding: "20px 24px", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", gap: 8 }}>
-                <div style={{ fontSize: 32, fontWeight: 700, color: "#57534E" }}>42</div>
-                <div style={{ fontSize: 13, fontWeight: 500, color: "#6B7280" }}>Total Closed Lost</div>
-                <div style={{ fontSize: 12, color: "#9CA3AF", textAlign: "center", maxWidth: 180 }}>
-                  6.3% of pipeline — deliberate charcoal, not alarm red
-                </div>
-                <div className="mt-4 w-full" style={{ borderTop: "1px solid #E5E7EB", paddingTop: 16 }}>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: "#9CA3AF", marginBottom: 8 }}>TOP REASON</div>
-                  <div style={{ fontSize: 14, fontWeight: 500, color: "#57534E" }}>Price / budget constraints</div>
-                  <div style={{ fontSize: 12, color: "#9CA3AF" }}>34 leads (81% of closed-lost)</div>
-                </div>
-              </Card>
-            </div>
+            <LostReasonCard reasons={data.lostReasons} />
           </div>
         </>
       )}
