@@ -2,6 +2,8 @@
 
 import { useState, useRef, useEffect, type ReactNode } from "react";
 import type { UserRole } from "@/lib/types";
+import { activeStages, stageColor } from "@/lib/pipeline-stages";
+import { usePipelineStages } from "@/lib/use-pipeline-stages";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -43,25 +45,6 @@ const NICHES = [
 
 const SOURCES = ["Referral", "Website", "Cold Call", "LinkedIn", "Trade Show", "Email Campaign", "Partner", "Event"];
 
-const STAGES = [
-  "New Lead", "No Answer", "Try Again", "Conversation",
-  "Proposal Sent", "Meeting Booked", "Estimate Sent",
-  "Closed Won", "Closed Lost", "Dead Lead",
-];
-
-const STAGE_COLORS: Record<string, string> = {
-  "New Lead":       "#94A3B8",
-  "No Answer":      "#FB923C",
-  "Try Again":      "#F97316",
-  "Conversation":   "#38BDF8",
-  "Proposal Sent":  "#6366F1",
-  "Meeting Booked": "#F59E0B",
-  "Estimate Sent":  "#0891B2",
-  "Closed Won":     "#16A34A",
-  "Closed Lost":    "#57534E",
-  "Dead Lead":      "#DC2626",
-};
-
 const PRIORITY_COLOR: Record<Exclude<Priority, null>, string> = {
   hot: "#EF4444",
   warm: "#F59E0B",
@@ -76,7 +59,7 @@ const EMPTY_FORM: LeadForm = {
   source: "",
   priority: null,
   assignee: "",
-  stage: "New Lead",
+  stage: "",
   customCompanySize: "",
   customAnnualRevenue: "",
   customNdaSigned: false,
@@ -347,6 +330,8 @@ interface AddLeadModalProps {
 export function AddLeadModal({ mode = "add", role, showValidation = false, onClose }: AddLeadModalProps) {
   const [form, setForm] = useState<LeadForm>({ ...EMPTY_FORM });
   const [assignees, setAssignees] = useState<AssignableUser[]>([]);
+  const { stages } = usePipelineStages();
+  const stageOptions = activeStages(stages);
   const [errors, setErrors] = useState<FormErrors>(showValidation ? { company: "Company name is required" } : {});
   const [submitted, setSubmitted] = useState(showValidation);
   const [saving, setSaving] = useState(false);
@@ -371,6 +356,16 @@ export function AddLeadModal({ mode = "add", role, showValidation = false, onClo
     };
     void loadAssignees();
   }, [role]);
+
+  useEffect(() => {
+    const options = activeStages(stages);
+    if (options.length === 0) return;
+    setForm((prev) => {
+      if (options.some((stage) => stage.name === prev.stage)) return prev;
+      const fallback = options.find((stage) => stage.isDefault) ?? options[0];
+      return { ...prev, stage: fallback.name };
+    });
+  }, [stages]);
 
   const set = <K extends keyof LeadForm>(key: K, val: LeadForm[K]) => {
     setForm((prev) => ({ ...prev, [key]: val }));
@@ -581,16 +576,16 @@ export function AddLeadModal({ mode = "add", role, showValidation = false, onClo
             <SelectInput
               value={form.stage}
               onChange={(v) => set("stage", v)}
-              options={STAGES}
+              options={stageOptions.map((stage) => stage.name)}
               renderOption={(s) => (
                 <div className="flex items-center gap-2.5">
-                  <span className="w-2 h-2 rounded-full shrink-0" style={{ background: STAGE_COLORS[s] }} />
+                  <span className="w-2 h-2 rounded-full shrink-0" style={{ background: stageColor(stageOptions, s) }} />
                   <span>{s}</span>
                 </div>
               )}
               renderValue={(s) => (
                 <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full shrink-0" style={{ background: STAGE_COLORS[s] }} />
+                  <span className="w-2 h-2 rounded-full shrink-0" style={{ background: stageColor(stageOptions, s) }} />
                   <span>{s}</span>
                 </div>
               )}

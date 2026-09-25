@@ -3,6 +3,8 @@
 import { useState, useRef, useEffect, type ReactNode } from "react";
 import type { UserRole } from "@/lib/types";
 import { assigneeColor, initials } from "@/lib/lead-ui";
+import { nextStageName, stageColor, type PipelineStage } from "@/lib/pipeline-stages";
+import { usePipelineStages } from "@/lib/use-pipeline-stages";
 import { LogCallModal, type LogCallForm } from "@/components/LogCallModal";
 import { LOST_REASON_OPTIONS, LostReasonModal, type LostReason } from "@/components/LostReasonModal";
 
@@ -61,21 +63,6 @@ interface LeadDetail {
 }
 
 // ─── Palette helpers ──────────────────────────────────────────────────────────
-
-const STAGE_COLORS: Record<string, string> = {
-  "New Lead":       "#94A3B8",
-  "No Answer":      "#FB923C",
-  "Try Again":      "#F97316",
-  "Conversation":   "#38BDF8",
-  "Proposal Sent":  "#6366F1",
-  "Meeting Booked": "#F59E0B",
-  "Estimate Sent":  "#0891B2",
-  "Closed Won":     "#16A34A",
-  "Closed Lost":    "#57534E",
-  "Dead Lead":      "#DC2626",
-};
-
-const STAGE_ORDER = Object.keys(STAGE_COLORS);
 
 const PRIORITY_COLOR: Record<Priority, string> = {
   hot: "#EF4444",
@@ -246,10 +233,10 @@ function CheckIcon({ size = 12 }: { size?: number }) {
 
 // ─── Stage Selector dropdown ──────────────────────────────────────────────────
 
-function StageSelector({ stage, onChange }: { stage: string; onChange: (s: string) => void }) {
+function StageSelector({ stage, stages, onChange }: { stage: string; stages: PipelineStage[]; onChange: (s: string) => void }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const color = STAGE_COLORS[stage] ?? "#94A3B8";
+  const color = stageColor(stages, stage);
 
   useEffect(() => {
     if (!open) return;
@@ -271,20 +258,20 @@ function StageSelector({ stage, onChange }: { stage: string; onChange: (s: strin
       </button>
       {open && (
         <div className="absolute left-0 z-50 rounded-lg overflow-hidden" style={{ top: "calc(100% + 6px)", minWidth: 180, background: "#FFFFFF", boxShadow: "0 4px 20px rgba(15,27,60,0.14)", border: "1px solid #E3E7EF" }}>
-          {STAGE_ORDER.map((s) => {
-            const c = STAGE_COLORS[s];
-            const active = s === stage;
+          {stages.filter((item) => item.active).map((item) => {
+            const c = item.color;
+            const active = item.name === stage;
             return (
               <button
-                key={s}
-                onClick={() => { onChange(s); setOpen(false); }}
+                key={item.id}
+                onClick={() => { onChange(item.name); setOpen(false); }}
                 className="w-full flex items-center gap-2.5 px-3 py-2.5"
                 style={{ fontSize: 13, color: active ? c : "#374151", background: active ? `${c}12` : "transparent" }}
                 onMouseEnter={(e) => { if (!active) (e.currentTarget as HTMLButtonElement).style.background = "#F9FAFB"; }}
                 onMouseLeave={(e) => { if (!active) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
               >
                 <span className="w-2 h-2 rounded-full shrink-0" style={{ background: c }} />
-                <span className="flex-1 text-left">{s}</span>
+                <span className="flex-1 text-left">{item.name}</span>
                 {active && <span style={{ color: "#2FBEB3" }}><CheckIcon /></span>}
               </button>
             );
@@ -357,7 +344,7 @@ function HeaderKebab({
 
 // ─── Details Tab ──────────────────────────────────────────────────────────────
 
-function DetailsTab({ lead, role, onLeadChange, onMarkDead }: { lead: LeadDetail; role: UserRole; onLeadChange: (l: LeadDetail) => void; onMarkDead: () => void }) {
+function DetailsTab({ lead, role, stages, onLeadChange, onMarkDead }: { lead: LeadDetail; role: UserRole; stages: PipelineStage[]; onLeadChange: (l: LeadDetail) => void; onMarkDead: () => void }) {
   const [notes, setNotes] = useState(lead.notes);
   const [autoSaved, setAutoSaved] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -422,7 +409,7 @@ function DetailsTab({ lead, role, onLeadChange, onMarkDead }: { lead: LeadDetail
     });
   };
 
-  const nextStage = STAGE_ORDER[STAGE_ORDER.indexOf(lead.stage) + 1];
+  const nextStage = nextStageName(stages, lead.stage);
 
   return (
     <div className="flex gap-5 p-5">
@@ -622,8 +609,8 @@ function DetailsTab({ lead, role, onLeadChange, onMarkDead }: { lead: LeadDetail
             style={{ background: "#F9FAFB", border: "1px solid #E3E7EF" }}
           >
             <span style={{ fontSize: 12, color: "#6B7280" }}>Next stage:</span>
-            <span className="flex items-center gap-1.5 rounded-full px-2.5 py-0.5" style={{ background: `${STAGE_COLORS[nextStage]}18`, color: STAGE_COLORS[nextStage], fontSize: 12, fontWeight: 600 }}>
-              <span className="w-1.5 h-1.5 rounded-full" style={{ background: STAGE_COLORS[nextStage] }} />
+            <span className="flex items-center gap-1.5 rounded-full px-2.5 py-0.5" style={{ background: `${stageColor(stages, nextStage)}18`, color: stageColor(stages, nextStage), fontSize: 12, fontWeight: 600 }}>
+              <span className="w-1.5 h-1.5 rounded-full" style={{ background: stageColor(stages, nextStage) }} />
               {nextStage}
             </span>
           </div>
@@ -862,6 +849,7 @@ export function LeadDetailPanel({ role, leadId, initialTab = "details", onClose,
   const [pendingLost, setPendingLost] = useState(false);
   const [pendingReassign, setPendingReassign] = useState(false);
   const [pendingDelete, setPendingDelete] = useState(false);
+  const { stages } = usePipelineStages();
 
   useEffect(() => {
     let cancelled = false;
@@ -971,8 +959,7 @@ export function LeadDetailPanel({ role, leadId, initialTab = "details", onClose,
     onClose?.();
   };
 
-  const nextStageIndex = STAGE_ORDER.indexOf(lead.stage) + 1;
-  const nextStage = STAGE_ORDER[nextStageIndex];
+  const nextStage = nextStageName(stages, lead.stage);
 
   return (
     <>
@@ -1021,7 +1008,7 @@ export function LeadDetailPanel({ role, leadId, initialTab = "details", onClose,
 
             {/* Stage selector + Next Stage */}
             <div className="flex items-center gap-2 shrink-0">
-              <StageSelector stage={lead.stage} onChange={requestStageChange} />
+              <StageSelector stage={lead.stage} stages={stages} onChange={requestStageChange} />
               {nextStage && (
                 <button
                   className="flex items-center gap-1.5 rounded-lg font-semibold"
@@ -1066,7 +1053,7 @@ export function LeadDetailPanel({ role, leadId, initialTab = "details", onClose,
         {/* ── Scrollable body */}
         <div className="flex-1 overflow-y-auto" style={{ background: "#F9FAFB" }}>
           {error && <p style={{ padding: "12px 20px 0", fontSize: 13, color: "#DC2626" }}>{error}</p>}
-          {tab === "details" && <DetailsTab lead={lead} role={role} onLeadChange={setLead} onMarkDead={() => requestStageChange("Dead Lead")} />}
+          {tab === "details" && <DetailsTab lead={lead} role={role} stages={stages} onLeadChange={setLead} onMarkDead={() => requestStageChange("Dead Lead")} />}
           {tab === "activity" && <ActivityTab lead={lead} />}
         </div>
       </div>

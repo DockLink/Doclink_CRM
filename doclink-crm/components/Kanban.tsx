@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import type { UserRole } from "@/lib/types";
 import { LostReasonModal, type LostReason } from "@/components/LostReasonModal";
 import { assigneeColor, displayDate, initials, type ApiLead, urgencyFor } from "@/lib/lead-ui";
+import { activeStages, stageColor, type PipelineStage } from "@/lib/pipeline-stages";
+import { usePipelineStages } from "@/lib/use-pipeline-stages";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -31,25 +33,6 @@ type PendingLost = {
 };
 
 // ─── Palette ──────────────────────────────────────────────────────────────────
-
-const STAGE_COLOR: Record<string, string> = {
-  "New Lead":       "#94A3B8",
-  "No Answer":      "#FB923C",
-  "Try Again":      "#F97316",
-  "Conversation":   "#38BDF8",
-  "Proposal Sent":  "#6366F1",
-  "Meeting Booked": "#F59E0B",
-  "Estimate Sent":  "#0891B2",
-  "Closed Won":     "#16A34A",
-  "Closed Lost":    "#57534E",
-  "Dead Lead":      "#DC2626",
-};
-
-const STAGE_ORDER = [
-  "New Lead", "No Answer", "Try Again", "Conversation",
-  "Proposal Sent", "Meeting Booked", "Estimate Sent",
-  "Closed Won", "Closed Lost", "Dead Lead",
-];
 
 const PRIORITY_COLOR = { hot: "#EF4444", warm: "#F59E0B", cold: "#3B82F6" };
 
@@ -209,9 +192,11 @@ function FollowUpChip({ date, urgency }: { date: string; urgency: Lead["followUp
 
 function StageSelector({
   currentStage,
+  stages,
   onSelect,
 }: {
   currentStage: string;
+  stages: PipelineStage[];
   onSelect: (stage: string) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -249,7 +234,7 @@ function StageSelector({
         aria-label="Change stage"
         aria-expanded={open}
       >
-        <div className="w-2 h-2 rounded-full shrink-0" style={{ background: STAGE_COLOR[currentStage] }} />
+        <div className="w-2 h-2 rounded-full shrink-0" style={{ background: stageColor(stages, currentStage) }} />
         <span style={{ fontSize: 10, fontWeight: 500, color: open ? "#0E7A70" : "#6B7280", maxWidth: 72, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {currentStage}
         </span>
@@ -274,13 +259,13 @@ function StageSelector({
           <div className="px-3 py-2" style={{ borderBottom: "1px solid #F3F4F6" }}>
             <span style={{ fontSize: 10, fontWeight: 600, color: "#9CA3AF", letterSpacing: "0.06em" }}>MOVE TO STAGE</span>
           </div>
-          {STAGE_ORDER.map((stage) => {
-            const isCurrent = stage === currentStage;
+          {activeStages(stages).map((stage) => {
+            const isCurrent = stage.name === currentStage;
             return (
               <button
-                key={stage}
+                key={stage.id}
                 type="button"
-                onClick={() => handleSelect(stage)}
+                onClick={() => handleSelect(stage.name)}
                 className="w-full flex items-center gap-2 px-3 text-left transition-colors"
                 style={{
                   height: 34,
@@ -293,9 +278,9 @@ function StageSelector({
                 onMouseLeave={(e) => { if (!isCurrent) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
                 disabled={isCurrent}
               >
-                <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: STAGE_COLOR[stage] }} />
+                <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: stage.color }} />
                 <span style={{ fontSize: 12, color: isCurrent ? "#0E7A70" : "#374151", fontWeight: isCurrent ? 600 : 400, flex: 1 }}>
-                  {stage}
+                  {stage.name}
                 </span>
                 {isCurrent && <CheckTinyIcon />}
               </button>
@@ -311,10 +296,12 @@ function StageSelector({
 
 function LeadCard({
   lead,
+  stages,
   isPlaceholder = false,
   onStageChange,
 }: {
   lead: Lead;
+  stages: PipelineStage[];
   isPlaceholder?: boolean;
   onStageChange: (leadId: string, newStage: string) => void;
 }) {
@@ -399,6 +386,7 @@ function LeadCard({
         {/* Quick-stage selector */}
         <StageSelector
           currentStage={lead.stage}
+          stages={stages}
           onSelect={(newStage) => onStageChange(lead.id, newStage)}
         />
 
@@ -435,11 +423,13 @@ function LeadCard({
 function KanbanColumn({
   stage,
   color,
+  stages,
   leads,
   onStageChange,
 }: {
   stage: string;
   color: string;
+  stages: PipelineStage[];
   leads: Lead[];
   onStageChange: (leadId: string, newStage: string) => void;
 }) {
@@ -473,7 +463,7 @@ function KanbanColumn({
         style={{ background: "#F8FAFB", border: "2px solid transparent", minHeight: 120 }}
       >
         {leads.map((lead) => (
-          <LeadCard key={lead.id} lead={lead} onStageChange={onStageChange} />
+          <LeadCard key={lead.id} lead={lead} stages={stages} onStageChange={onStageChange} />
         ))}
       </div>
     </div>
@@ -550,6 +540,8 @@ function KanbanTopBar({ role }: { role: UserRole }) {
 
 export function Kanban({ role }: { role: UserRole }) {
   const [leads, setLeads] = useState<Lead[]>([]);
+  const { stages, loading: stagesLoading, error: stagesError } = usePipelineStages();
+  const columns = activeStages(stages);
   const [pendingLost, setPendingLost] = useState<PendingLost | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -633,15 +625,16 @@ export function Kanban({ role }: { role: UserRole }) {
         className="flex-1 overflow-x-auto overflow-y-auto"
         style={{ padding: "16px 20px", background: "#FAFAFA" }}
       >
-        {loading && <p style={{ padding: 24, color: "#6B7280", fontSize: 13 }}>Loading leads...</p>}
-        {!loading && error && <p style={{ padding: 24, color: "#DC2626", fontSize: 13 }}>{error}</p>}
+        {(loading || stagesLoading) && <p style={{ padding: 24, color: "#6B7280", fontSize: 13 }}>Loading pipeline...</p>}
+        {!loading && (error || stagesError) && <p style={{ padding: 24, color: "#DC2626", fontSize: 13 }}>{error || stagesError}</p>}
         <div className="flex gap-3" style={{ minWidth: "max-content", alignItems: "flex-start" }}>
-          {STAGE_ORDER.map((stage) => (
+          {columns.map((stage) => (
             <KanbanColumn
-              key={stage}
-              stage={stage}
-              color={STAGE_COLOR[stage]}
-              leads={leads.filter((l) => l.stage === stage)}
+              key={stage.id}
+              stage={stage.name}
+              color={stage.color}
+              stages={columns}
+              leads={leads.filter((l) => l.stage === stage.name)}
               onStageChange={handleStageChange}
             />
           ))}

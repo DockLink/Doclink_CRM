@@ -4,6 +4,8 @@ import { useState, useRef, useEffect, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import type { UserRole } from "@/lib/types";
 import { type ApiLead, urgencyFor } from "@/lib/lead-ui";
+import { stageColor } from "@/lib/pipeline-stages";
+import { usePipelineStages } from "@/lib/use-pipeline-stages";
 import { LogCallModal, type LogCallForm } from "@/components/LogCallModal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -28,19 +30,6 @@ interface FollowUp {
   calls: number;
   notes: string;
 }
-
-const STAGE_COLOR: Record<string, string> = {
-  "New Lead": "#94A3B8",
-  "No Answer": "#FB923C",
-  "Try Again": "#F97316",
-  "Conversation": "#38BDF8",
-  "Proposal Sent": "#6366F1",
-  "Meeting Booked": "#F59E0B",
-  "Estimate Sent": "#0891B2",
-  "Closed Won": "#16A34A",
-  "Closed Lost": "#57534E",
-  "Dead Lead": "#DC2626",
-};
 
 function localDateKey(date = new Date()) {
   const year = date.getFullYear();
@@ -268,6 +257,8 @@ function FollowUpRow({
   onReschedule: () => void;
   onMarkDone: () => void;
 }) {
+  const { stages } = usePipelineStages();
+  const color = stageColor(stages, lead.stage);
   const rowBg =
     variant === "overdue" ? "#FFF8F8" :
     variant === "today" ? "#FFFFFF" :
@@ -304,7 +295,7 @@ function FollowUpRow({
         <p style={{ fontSize: 13, fontWeight: 600, color: "#111111", marginBottom: 1 }}>{lead.company}</p>
         <p className="flex items-center gap-1.5" style={{ fontSize: 11, color: "#6B7280" }}>
           <span>{lead.niche}</span>
-          <span className="px-1.5 py-0.5 rounded-full" style={{ background: `${STAGE_COLOR[lead.stage] ?? "#94A3B8"}22`, color: STAGE_COLOR[lead.stage] ?? "#64748B", fontWeight: 600 }}>
+          <span className="px-1.5 py-0.5 rounded-full" style={{ background: `${color}22`, color, fontWeight: 600 }}>
             {lead.stage}
           </span>
         </p>

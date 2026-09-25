@@ -1,20 +1,11 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { createClient } from "@/lib/supabase/server";
+import { requireProfile, requireRole } from "@/lib/api-auth";
 
-async function getSuperadmin() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return null;
-  const profile = await prisma.user.findFirst({
-    where: { OR: [{ id: user.id }, { email: user.email ?? "" }], isActive: true },
-  });
-  return profile?.role === "superadmin" ? profile : null;
-}
-
-export async function GET() {
-  const profile = await getSuperadmin();
-  if (!profile) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+export async function GET(request: Request) {
+  const { profile, response } = await requireProfile(request);
+  if (response) return response;
+  if (!profile) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const stages = await prisma.pipelineStage.findMany({
     orderBy: { position: "asc" },
@@ -32,8 +23,11 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const profile = await getSuperadmin();
-  if (!profile) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  const { profile, response } = await requireProfile(request);
+  if (response) return response;
+  if (!profile) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const forbidden = requireRole(profile, "superadmin");
+  if (forbidden) return forbidden;
 
   const body = await request.json() as { name?: string; color?: string };
   const name = body.name?.trim() ?? "";
@@ -48,8 +42,11 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const profile = await getSuperadmin();
-  if (!profile) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  const { profile, response } = await requireProfile(request);
+  if (response) return response;
+  if (!profile) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const forbidden = requireRole(profile, "superadmin");
+  if (forbidden) return forbidden;
 
   const body = await request.json() as {
     id?: string;
@@ -69,9 +66,14 @@ export async function PATCH(request: Request) {
   if (body.isActive === false && stage._count.leads > 0) {
     return NextResponse.json({ error: "Cannot deactivate a stage that contains leads" }, { status: 409 });
   }
+  const nextName = body.name?.trim();
+  if (nextName && nextName !== stage.name) {
+    const duplicate = await prisma.pipelineStage.findFirst({ where: { name: nextName, NOT: { id: stage.id } } });
+    if (duplicate) return NextResponse.json({ error: "A stage with this name already exists" }, { status: 409 });
+  }
   const data: { isActive?: boolean; name?: string; color?: string } = {};
   if (typeof body.isActive === "boolean") data.isActive = body.isActive;
-  if (body.name?.trim()) data.name = body.name.trim();
+  if (nextName) data.name = nextName;
   if (body.color?.trim()) data.color = body.color.trim();
   await prisma.pipelineStage.update({ where: { id: body.id }, data });
   return NextResponse.json({ updated: 1 });

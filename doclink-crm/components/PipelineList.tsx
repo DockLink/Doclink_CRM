@@ -5,23 +5,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { UserRole } from "@/lib/types";
 import { assigneeColor, displayDate, displayTime, initials, type ApiLead, urgencyFor } from "@/lib/lead-ui";
+import { activeStages, stageColor, type PipelineStage } from "@/lib/pipeline-stages";
+import { usePipelineStages } from "@/lib/use-pipeline-stages";
 
 // ─── Palette ──────────────────────────────────────────────────────────────────
 
-const STAGE_COLOR: Record<string, string> = {
-  "New Lead":       "#94A3B8",
-  "No Answer":      "#FB923C",
-  "Try Again":      "#F97316",
-  "Conversation":   "#38BDF8",
-  "Proposal Sent":  "#6366F1",
-  "Meeting Booked": "#F59E0B",
-  "Estimate Sent":  "#0891B2",
-  "Closed Won":     "#16A34A",
-  "Closed Lost":    "#57534E",
-  "Dead Lead":      "#DC2626",
-};
-
-const STAGE_ORDER = Object.keys(STAGE_COLOR);
 const PRIORITY_COLOR = { hot: "#EF4444", warm: "#F59E0B", cold: "#3B82F6" } as const;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -421,11 +409,13 @@ function ListTopBar({ role }: { role: UserRole }) {
 
 function FilterBar({
   filters,
+  stages,
   setFilter,
   search,
   setSearch,
 }: {
   filters: Record<string, string | null>;
+  stages: PipelineStage[];
   setFilter: (key: string, val: string | null) => void;
   search: string;
   setSearch: (v: string) => void;
@@ -441,9 +431,9 @@ function FilterBar({
       style={{ minHeight: 52, background: "#FFFFFF", borderBottom: "1px solid #E5E7EB" }}
     >
       <FilterPill
-        label="Stage" options={STAGE_ORDER} value={filters.stage ?? null}
+        label="Stage" options={activeStages(stages).map((stage) => stage.name)} value={filters.stage ?? null}
         onChange={(v) => setFilter("stage", v)}
-        renderOption={(o) => <div className="w-2 h-2 rounded-full shrink-0" style={{ background: STAGE_COLOR[o] }} />}
+        renderOption={(o) => <div className="w-2 h-2 rounded-full shrink-0" style={{ background: stageColor(stages, o) }} />}
       />
       <FilterPill
         label="Assignee" options={assigneeOptions} value={filters.assignee ?? null}
@@ -489,6 +479,7 @@ type SortKey = keyof ListLead | null;
 
 export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: boolean }) {
   const router = useRouter();
+  const { stages } = usePipelineStages();
   const [leads, setLeads] = useState<ListLead[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -626,7 +617,7 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
   return (
     <div className="flex flex-col" style={{ height: "calc(100vh - 64px)" }}>
       <ListTopBar role={role} />
-      <FilterBar filters={filters} setFilter={setFilter} search={search} setSearch={setSearch} />
+      <FilterBar filters={filters} stages={stages} setFilter={setFilter} search={search} setSearch={setSearch} />
 
       {/* Table container */}
       <div className="flex-1 overflow-auto" style={{ padding: "16px 20px 80px" }}>
@@ -772,7 +763,7 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
                     <td style={{ padding: "0 12px" }}>
                       <span
                         className="inline-block px-2 py-0.5 rounded-full text-white truncate"
-                        style={{ fontSize: 10, fontWeight: 500, background: STAGE_COLOR[lead.stage], maxWidth: 130, lineHeight: 1.6 }}
+                        style={{ fontSize: 10, fontWeight: 500, background: stageColor(stages, lead.stage), maxWidth: 130, lineHeight: 1.6 }}
                       >
                         {lead.stage}
                       </span>

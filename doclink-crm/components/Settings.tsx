@@ -2,6 +2,8 @@
 
 import { useState, useRef, useEffect, type ReactNode } from "react";
 import type { UserRole } from "@/lib/types";
+import type { PipelineStage } from "@/lib/pipeline-stages";
+import { usePipelineStages } from "@/lib/use-pipeline-stages";
 
 // ─── Sub-nav sections ─────────────────────────────────────────────────────────
 
@@ -350,53 +352,119 @@ function IconBtn({ children, title, danger }: { children: ReactNode; title?: str
 
 // ─── Frame 2: Pipeline Stages ─────────────────────────────────────────────────
 
-interface Stage { id: string; name: string; color: string; leads: number; active: boolean; }
-
-const INITIAL_STAGES: Stage[] = [
-  { id: "s1", name: "New Lead",       color: "#94A3B8", leads: 24, active: true },
-  { id: "s2", name: "No Answer",      color: "#FB923C", leads: 18, active: true },
-  { id: "s3", name: "Try Again",      color: "#F97316", leads: 11, active: true },
-  { id: "s4", name: "Conversation",   color: "#38BDF8", leads: 42, active: true },
-  { id: "s5", name: "Proposal Sent",  color: "#6366F1", leads: 27, active: true },
-  { id: "s6", name: "Meeting Booked", color: "#F59E0B", leads: 15, active: true },
-  { id: "s7", name: "Estimate Sent",  color: "#0891B2", leads: 8,  active: true },
-  { id: "s8", name: "Closed Won",     color: "#16A34A", leads: 63, active: true },
-  { id: "s9", name: "Closed Lost",    color: "#57534E", leads: 35, active: true },
-  { id: "s10",name: "Dead Lead",      color: "#DC2626", leads: 21, active: true },
-];
+type Stage = PipelineStage;
 
 const PRESET_COLORS = ["#94A3B8","#FB923C","#F97316","#38BDF8","#6366F1","#F59E0B","#0891B2","#16A34A","#57534E","#DC2626","#EC4899","#8B5CF6","#06B6D4","#84CC16"];
 
 function StagesFrame() {
-  const [stages, setStages] = useState(INITIAL_STAGES);
+  const loaded = usePipelineStages();
+  const [stages, setStages] = useState<Stage[]>([]);
+  const [error, setError] = useState("");
   const [showAdd, setShowAdd] = useState(false);
   const [newName, setNewName] = useState("");
   const [newColor, setNewColor] = useState("#2FBEB3");
+  const [saving, setSaving] = useState(false);
+  const [editing, setEditing] = useState<Stage | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState<string | null>(null);
 
-  const toggleActive = (id: string) => setStages((p) => p.map((s) => s.id === id ? { ...s, active: !s.active } : s));
+  useEffect(() => {
+    if (!dragging) setStages(loaded.stages);
+  }, [loaded.stages, dragging]);
+
+  useEffect(() => {
+    if (loaded.error) setError(loaded.error);
+  }, [loaded.error]);
+
+  const reload = loaded.reload;
+
+  const patchStage = async (body: { id: string; isActive?: boolean; name?: string; color?: string }) => {
+    setError("");
+    const response = await fetch("/api/pipeline-stages", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const result = await response.json().catch(() => ({})) as { error?: string };
+    if (!response.ok) {
+      setError(result.error ?? "Unable to update stage.");
+      return false;
+    }
+    await reload();
+    return true;
+  };
+
+  const toggleActive = (stage: Stage) => {
+    if (stage.leads > 0 && stage.active) {
+      setError("Cannot deactivate a stage that contains leads.");
+      return;
+    }
+    void patchStage({ id: stage.id, isActive: !stage.active });
+  };
 
   const handleDragStart = (id: string) => setDragging(id);
   const handleDragOver = (id: string) => { if (id !== dragging) setDragOver(id); };
   const handleDrop = (targetId: string) => {
     if (!dragging || dragging === targetId) { setDragging(null); setDragOver(null); return; }
-    setStages((prev) => {
-      const arr = [...prev];
-      const fromIdx = arr.findIndex((s) => s.id === dragging);
-      const toIdx = arr.findIndex((s) => s.id === targetId);
-      const [moved] = arr.splice(fromIdx, 1);
-      arr.splice(toIdx, 0, moved);
-      return arr;
+    const arr = [...stages];
+    const fromIdx = arr.findIndex((s) => s.id === dragging);
+    const toIdx = arr.findIndex((s) => s.id === targetId);
+    const [moved] = arr.splice(fromIdx, 1);
+    arr.splice(toIdx, 0, moved);
+    setStages(arr);
+    setDragging(null);
+    setDragOver(null);
+    void fetch("/api/pipeline-stages", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ order: arr.map((stage) => stage.id) }),
+    }).then(async (response) => {
+      if (!response.ok) {
+        const result = await response.json().catch(() => ({})) as { error?: string };
+        setError(result.error ?? "Unable to save stage order.");
+      }
+      await reload();
+    }).catch(() => {
+      setError("Unable to reach the server. Please try again.");
+      void reload();
     });
-    setDragging(null); setDragOver(null);
+  };
+
+  const addStage = async () => {
+    const name = newName.trim();
+    if (!name) return;
+    setSaving(true);
+    setError("");
+    try {
+      const response = await fetch("/api/pipeline-stages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, color: newColor }),
+      });
+      const result = await response.json() as { error?: string };
+      if (!response.ok) {
+        setError(result.error ?? "Unable to add stage.");
+        return;
+      }
+      setNewName("");
+      setNewColor("#2FBEB3");
+      setShowAdd(false);
+      await reload();
+    } catch {
+      setError("Unable to reach the server. Please try again.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
     <div>
-      <SectionHeader title="Pipeline Stages" sub='Drag to reorder. Changes apply immediately across all views.' action={<PrimaryBtn onClick={() => setShowAdd(true)}>+ Add Stage</PrimaryBtn>} />
+      <SectionHeader title="Pipeline Stages" sub="Drag to reorder. Changes are saved and used across the pipeline." action={<PrimaryBtn onClick={() => setShowAdd(true)}>+ Add Stage</PrimaryBtn>} />
+      {error && <p role="alert" style={{ fontSize: 13, color: "#DC2626", marginBottom: 12 }}>{error}</p>}
 
       <TableCard>
+        {loaded.loading && <p style={{ padding: 24, textAlign: "center", color: "#6B7280", fontSize: 13 }}>Loading stages...</p>}
+        {!loaded.loading && stages.length === 0 && <p style={{ padding: 24, textAlign: "center", color: "#6B7280", fontSize: 13 }}>No pipeline stages yet.</p>}
         {stages.map((s, i) => {
           const isDragging = dragging === s.id;
           const isDragOver = dragOver === s.id;
@@ -417,7 +485,7 @@ function StagesFrame() {
                   borderBottom: i < stages.length - 1 ? "1px solid #F3F4F6" : "none",
                   background: isDragging ? "#F9FAFB" : "#FFFFFF",
                   boxShadow: isDragging ? "0 4px 16px rgba(15,27,60,0.12)" : "none",
-                  opacity: isDragging ? 0.7 : 1,
+                  opacity: isDragging ? 0.7 : s.active ? 1 : 0.55,
                   cursor: "grab",
                   transform: isDragging ? "rotate(1deg)" : "none",
                   transition: "box-shadow 120ms, opacity 120ms",
@@ -427,9 +495,16 @@ function StagesFrame() {
                 <div className="w-4 h-4 rounded-full shrink-0" style={{ background: s.color }} />
                 <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: "#111111" }}>{s.name}</span>
                 <span className="px-2 py-0.5 rounded-full" style={{ fontSize: 11, color: "#6B7280", background: "#F1F5F9" }}>{s.leads} leads</span>
-                <span className="px-2 py-0.5 rounded-full" style={{ fontSize: 10, fontWeight: 700, color: "#9CA3AF", background: "#F1F5F9", textTransform: "uppercase", letterSpacing: "0.05em" }}>Default</span>
-                <Toggle on={s.active} onChange={() => s.leads === 0 ? toggleActive(s.id) : undefined} />
-                <StageKebab stage={s} />
+                {s.isDefault && <span className="px-2 py-0.5 rounded-full" style={{ fontSize: 10, fontWeight: 700, color: "#9CA3AF", background: "#F1F5F9", textTransform: "uppercase", letterSpacing: "0.05em" }}>Default</span>}
+                <Toggle on={s.active} onChange={() => toggleActive(s)} />
+                <StageKebab
+                  stage={s}
+                  onEdit={() => setEditing(s)}
+                  onDeactivate={() => {
+                    if (s.leads > 0) return;
+                    void patchStage({ id: s.id, isActive: false });
+                  }}
+                />
               </div>
             </div>
           );
@@ -445,23 +520,62 @@ function StagesFrame() {
             <div>
               <p style={{ fontSize: 11, fontWeight: 600, color: "#6B7280", marginBottom: 8 }}>Color</p>
               <div className="flex flex-wrap gap-2">
-                {PRESET_COLORS.map((c) => (
-                  <button key={c} onClick={() => setNewColor(c)} className="w-6 h-6 rounded-full" style={{ background: c, border: newColor === c ? "2.5px solid #111111" : "2px solid transparent", boxSizing: "border-box" }} />
-                ))}
+                <ColorPicker value={newColor} onChange={setNewColor} />
               </div>
             </div>
             <div className="flex justify-end gap-2 pt-1">
               <SecondaryBtn onClick={() => setShowAdd(false)}>Cancel</SecondaryBtn>
-              <PrimaryBtn onClick={() => { if (newName.trim()) { setStages((p) => [...p, { id: `s-${Date.now()}`, name: newName.trim(), color: newColor, leads: 0, active: true }]); setNewName(""); setShowAdd(false); } }}>Add</PrimaryBtn>
+              <PrimaryBtn onClick={() => void addStage()}>{saving ? "Adding..." : "Add"}</PrimaryBtn>
             </div>
           </div>
         </div>
+      )}
+      {editing && (
+        <EditStageModal
+          stage={editing}
+          onClose={() => setEditing(null)}
+          onSave={async (name, color) => {
+            const saved = await patchStage({ id: editing.id, name, color });
+            if (saved) setEditing(null);
+          }}
+        />
       )}
     </div>
   );
 }
 
-function StageKebab({ stage }: { stage: Stage }) {
+function ColorPicker({ value, onChange }: { value: string; onChange: (color: string) => void }) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {PRESET_COLORS.map((color) => (
+        <button key={color} type="button" onClick={() => onChange(color)} className="w-6 h-6 rounded-full" style={{ background: color, border: value === color ? "2.5px solid #111111" : "2px solid transparent", boxSizing: "border-box" }} />
+      ))}
+    </div>
+  );
+}
+
+function EditStageModal({ stage, onClose, onSave }: { stage: Stage; onClose: () => void; onSave: (name: string, color: string) => void }) {
+  const [name, setName] = useState(stage.name);
+  const [color, setColor] = useState(stage.color);
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center" style={{ background: "rgba(15,27,60,0.3)" }} onClick={onClose}>
+      <div className="rounded-xl flex flex-col gap-4 p-5" style={{ width: 340, background: "#FFFFFF", border: "1px solid #E3E7EF", boxShadow: "0 8px 32px rgba(15,27,60,0.14)" }} onClick={(e) => e.stopPropagation()}>
+        <h3 style={{ fontSize: 14, fontWeight: 700, color: "#111111" }}>Edit Stage</h3>
+        <TextInput value={name} onChange={setName} placeholder="Stage name…" />
+        <div>
+          <p style={{ fontSize: 11, fontWeight: 600, color: "#6B7280", marginBottom: 8 }}>Color</p>
+          <ColorPicker value={color} onChange={setColor} />
+        </div>
+        <div className="flex justify-end gap-2 pt-1">
+          <SecondaryBtn onClick={onClose}>Cancel</SecondaryBtn>
+          <PrimaryBtn onClick={() => { if (name.trim()) onSave(name.trim(), color); }}>Save</PrimaryBtn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StageKebab({ stage, onEdit, onDeactivate }: { stage: Stage; onEdit: () => void; onDeactivate: () => void }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -478,14 +592,18 @@ function StageKebab({ stage }: { stage: Stage }) {
       </button>
       {open && (
         <div className="absolute right-0 z-30 rounded-lg overflow-hidden" style={{ top: "calc(100% + 4px)", minWidth: 160, background: "#FFFFFF", border: "1px solid #E3E7EF", boxShadow: "0 4px 16px rgba(15,27,60,0.12)" }}>
-          {["Rename", "Change Color", "Deactivate"].map((item) => (
-            <button key={item} onClick={() => setOpen(false)} className="w-full text-left px-4 py-2.5"
-              style={{ fontSize: 13, color: item === "Deactivate" && stage.leads > 0 ? "#9CA3AF" : "#374151", cursor: item === "Deactivate" && stage.leads > 0 ? "not-allowed" : "pointer" }}
-              disabled={item === "Deactivate" && stage.leads > 0}
-              title={item === "Deactivate" && stage.leads > 0 ? `Cannot deactivate — leads exist in this stage` : ""}
-              onMouseEnter={(e) => { if (!(item === "Deactivate" && stage.leads > 0)) (e.currentTarget as HTMLButtonElement).style.background = "#F9FAFB"; }}
+          {[
+            { label: "Rename", action: onEdit, disabled: false },
+            { label: "Change Color", action: onEdit, disabled: false },
+            { label: "Deactivate", action: onDeactivate, disabled: stage.leads > 0 || !stage.active },
+          ].map((item) => (
+            <button key={item.label} onClick={() => { if (item.disabled) return; setOpen(false); item.action(); }} className="w-full text-left px-4 py-2.5"
+              style={{ fontSize: 13, color: item.disabled ? "#9CA3AF" : "#374151", cursor: item.disabled ? "not-allowed" : "pointer" }}
+              disabled={item.disabled}
+              title={item.label === "Deactivate" && stage.leads > 0 ? "Cannot deactivate — leads exist in this stage" : ""}
+              onMouseEnter={(e) => { if (!item.disabled) (e.currentTarget as HTMLButtonElement).style.background = "#F9FAFB"; }}
               onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}>
-              {item}
+              {item.label}
             </button>
           ))}
         </div>

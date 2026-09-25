@@ -2,24 +2,11 @@
 
 import type { CSSProperties, ReactNode } from "react";
 import type { UserRole } from "@/lib/types";
+import { stageColor } from "@/lib/pipeline-stages";
+import { usePipelineStages } from "@/lib/use-pipeline-stages";
 import { LOST_REASON_OPTIONS } from "@/components/LostReasonModal";
 
 // ─── Palette constants ─────────────────────────────────────────────────────────
-
-const STAGE_COLORS: Record<string, string> = {
-  "New Lead":      "#94A3B8",
-  "No Answer":     "#FB923C",
-  "Try Again":     "#F97316",
-  "Conversation":  "#38BDF8",
-  "Proposal Sent": "#6366F1",
-  "Meeting Booked":"#F59E0B",
-  "Estimate Sent": "#8B5CF6",
-  "Closed Won":    "#16A34A",
-  "Closed Lost":   "#57534E",
-  "Dead Lead":     "#DC2626",
-};
-
-// ─── Mock data ─────────────────────────────────────────────────────────────────
 
 const PIPELINE_DATA = [
   { stage: "New Lead",       count: 142, pct: 21 },
@@ -89,10 +76,11 @@ const LOST_REASONS = [
 // ─── Shared small components ───────────────────────────────────────────────────
 
 function StagePill({ stage }: { stage: string }) {
+  const { stages } = usePipelineStages();
   return (
     <span
       className="inline-block px-2 py-0.5 rounded-full text-white"
-      style={{ fontSize: 10, fontWeight: 500, background: STAGE_COLORS[stage] ?? "#9CA3AF", lineHeight: 1.5 }}
+      style={{ fontSize: 10, fontWeight: 500, background: stageColor(stages, stage), lineHeight: 1.5 }}
     >
       {stage}
     </span>
@@ -331,6 +319,7 @@ function KPISection() {
 // ─── Section 3: Pipeline health ────────────────────────────────────────────────
 
 function PipelineHealthCard() {
+  const { stages } = usePipelineStages();
   const maxDays = Math.max(...AVG_DAYS.map((d) => d.days));
 
   return (
@@ -357,7 +346,7 @@ function PipelineHealthCard() {
               key={stage}
               title={`${stage}: ${pct}%`}
               className="transition-opacity hover:opacity-80"
-              style={{ width: `${pct}%`, background: STAGE_COLORS[stage], minWidth: pct > 0 ? 2 : 0 }}
+              style={{ width: `${pct}%`, background: stageColor(stages, stage), minWidth: pct > 0 ? 2 : 0 }}
             />
           ))}
         </div>
@@ -366,11 +355,11 @@ function PipelineHealthCard() {
         <div className="flex flex-wrap gap-x-4 gap-y-2 mt-4">
           {PIPELINE_DATA.map(({ stage, count }) => (
             <div key={stage} className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: STAGE_COLORS[stage] }} />
+              <div className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: stageColor(stages, stage) }} />
               <span style={{ fontSize: 11, color: "#6B7280" }}>{stage}</span>
               <span
                 className="px-1.5 py-0.5 rounded-full text-white"
-                style={{ fontSize: 10, fontWeight: 600, background: STAGE_COLORS[stage] }}
+                style={{ fontSize: 10, fontWeight: 600, background: stageColor(stages, stage) }}
               >
                 {count}
               </span>
@@ -389,7 +378,7 @@ function PipelineHealthCard() {
               <div className="flex-1 h-1.5 rounded-full" style={{ background: "#F3F4F6" }}>
                 <div
                   className="h-full rounded-full transition-all"
-                  style={{ width: `${(days / maxDays) * 100}%`, background: STAGE_COLORS[stage] }}
+                  style={{ width: `${(days / maxDays) * 100}%`, background: stageColor(stages, stage) }}
                 />
               </div>
               <div style={{ fontSize: 12, fontWeight: 500, color: "#111111", width: 40, textAlign: "right" }}>{days}d</div>
