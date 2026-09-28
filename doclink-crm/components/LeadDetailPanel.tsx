@@ -589,17 +589,33 @@ function DetailsTab({ lead, role, stages, onLeadChange, onMarkDead }: { lead: Le
 
         {/* Last Contacted */}
         <Card title="Last Contacted">
-          {lead.lastContacted ? (
-            <div className="flex flex-col gap-2.5">
-              <div className="flex items-center justify-between">
-                <OutcomeBadge outcome={lead.lastContacted.outcome} />
-                <span style={{ fontSize: 11, color: "#9CA3AF" }}>{lead.lastContacted.relativeTime}</span>
+          <div className="flex flex-col gap-3">
+            {lead.stage === "Closed Lost" && lead.lostReason && (
+              <div className="flex flex-col gap-2">
+                <span
+                  className="self-start px-2.5 py-1 rounded-full text-xs font-semibold"
+                  style={{ background: "#FEE2E2", color: "#B91C1C" }}
+                >
+                  Closed Lost
+                </span>
+                <p style={{ fontSize: 13, color: "#374151", lineHeight: 1.6 }}>{lead.lostReason}</p>
               </div>
-              <p style={{ fontSize: 13, color: "#374151", lineHeight: 1.6 }}>{lead.lastContacted.note}</p>
-            </div>
-          ) : (
-            <p style={{ fontSize: 13, color: "#9CA3AF" }}>No calls logged yet.</p>
-          )}
+            )}
+            {lead.lastContacted ? (
+              <div
+                className="flex flex-col gap-2.5"
+                style={lead.stage === "Closed Lost" && lead.lostReason ? { paddingTop: 12, borderTop: "1px solid #F3F4F6" } : undefined}
+              >
+                <div className="flex items-center justify-between">
+                  <OutcomeBadge outcome={lead.lastContacted.outcome} />
+                  <span style={{ fontSize: 11, color: "#9CA3AF" }}>{lead.lastContacted.relativeTime}</span>
+                </div>
+                <p style={{ fontSize: 13, color: "#374151", lineHeight: 1.6 }}>{lead.lastContacted.note}</p>
+              </div>
+            ) : !(lead.stage === "Closed Lost" && lead.lostReason) ? (
+              <p style={{ fontSize: 13, color: "#9CA3AF" }}>No calls logged yet.</p>
+            ) : null}
+          </div>
         </Card>
 
         {/* Next Stage hint */}

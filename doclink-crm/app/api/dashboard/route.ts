@@ -30,10 +30,8 @@ export async function GET(request: Request) {
   const { profile, response } = await requireProfile(request);
   if (response) return response;
 
-  const isSuperadmin = profile.role === "superadmin";
-
-  // ─── Scope: admins see only their own assigned leads ─────────────────────
-  const leadWhere: Prisma.LeadWhereInput = isSuperadmin ? {} : { assigneeId: profile.id };
+  // ─── Scope: admin and superadmin both see company-wide data ──────────────
+  const leadWhere: Prisma.LeadWhereInput = {};
 
   const [stages, leads] = await Promise.all([
     prisma.pipelineStage.findMany({ where: { isActive: true }, orderBy: { position: "asc" } }),
@@ -42,6 +40,8 @@ export async function GET(request: Request) {
       include: { stage: true, assignee: true },
     }),
   ]);
+
+  const isSuperadmin = profile.role === "superadmin";
 
   const now = new Date();
   const today = startOfDay(now);
@@ -111,7 +111,7 @@ export async function GET(request: Request) {
     return { stage: stage.name, count, pct, avgDays };
   });
 
-  // ─── Team activity + lost reasons: superadmin only ────────────────────
+  // ─── Team activity + lost reasons: superadmin only (null for admin) ────
   let teamActivity: {
     id: string;
     name: string;

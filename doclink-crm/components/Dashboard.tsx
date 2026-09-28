@@ -485,10 +485,6 @@ export function Dashboard({ role }: { role: UserRole }) {
 
   if (!data) return null;
 
-  // `role` prop lets a superadmin preview the admin view client-side; the API
-  // always enforces real scoping/permissions server-side regardless of this.
-  const showSuperadminSections = role === "superadmin";
-
   return (
     <div style={{ padding: 24 }}>
       {/* Role badge */}
@@ -506,9 +502,6 @@ export function Dashboard({ role }: { role: UserRole }) {
           >
             {role === "superadmin" ? "Superadmin" : "Admin"}
           </span>
-          {!showSuperadminSections && (
-            <span style={{ fontSize: 11, color: "#9CA3AF" }}>— Sections 4 &amp; 5 hidden</span>
-          )}
         </div>
       </div>
 
@@ -539,7 +532,7 @@ export function Dashboard({ role }: { role: UserRole }) {
       </div>
 
       {/* Sections 4 & 5 — Superadmin only */}
-      {showSuperadminSections && data.teamActivity && data.lostReasons && (
+      {data.teamActivity && data.lostReasons && (
         <>
           <div className="mb-6">
             <SectionLabel>Team Activity</SectionLabel>

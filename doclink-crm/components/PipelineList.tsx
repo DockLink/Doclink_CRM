@@ -37,33 +37,12 @@ interface ListLead {
   stale?: boolean;
 }
 
-// ─── Mock data ────────────────────────────────────────────────────────────────
-
-const LEADS: ListLead[] = [
-  { id:"1",  priority:"hot",  company:"Meridian Corp",    niche:"Enterprise SaaS", source:"Referral",     contact:"Sarah Blake",   phone:"+1 555 340 9921", stage:"Conversation",   followUpDate:"15 Sep 2026", followUpTime:"15:30", daysInStage:3,  calls:5, assigneeInitials:"JC", assigneeName:"James Carter",  assigneeColor:"#2FBEB3", urgency:"today" },
-  { id:"2",  priority:"warm", company:"Pinnacle Health",  niche:"Healthcare",      source:"Website",      contact:"Diane Yuen",    phone:"+1 555 219 6644", stage:"Conversation",   followUpDate:"14 Sep 2026", followUpTime:"16:00", daysInStage:5,  calls:3, assigneeInitials:"AS", assigneeName:"Aisha Santos",  assigneeColor:"#6366F1", urgency:"overdue" },
-  { id:"3",  priority:"hot",  company:"Nexus Digital",    niche:"Agency",          source:"Cold Call",    contact:"Tom Brennan",   phone:"+1 555 774 3300", stage:"Proposal Sent",  followUpDate:"14 Sep 2026", followUpTime:"11:00", daysInStage:7,  calls:6, assigneeInitials:"JC", assigneeName:"James Carter",  assigneeColor:"#2FBEB3", urgency:"overdue" },
-  { id:"4",  priority:"warm", company:"Vanguard Tech",    niche:"Deep Tech",       source:"LinkedIn",     contact:"Raj Patel",     phone:"+1 555 991 2254", stage:"Proposal Sent",  followUpDate:"15 Sep 2026", followUpTime:"10:30", daysInStage:4,  calls:4, assigneeInitials:"DK", assigneeName:"Derek Kim",     assigneeColor:"#F97316", urgency:"today" },
-  { id:"5",  priority:"hot",  company:"Ironbridge Group", niche:"Infrastructure",  source:"Trade Show",   contact:"Paul Denton",   phone:"+1 555 382 9901", stage:"Estimate Sent",  followUpDate:"15 Sep 2026", followUpTime:"16:00", daysInStage:2,  calls:7, assigneeInitials:"JC", assigneeName:"James Carter",  assigneeColor:"#2FBEB3", urgency:"today" },
-  { id:"6",  priority:"cold", company:"Vertex Systems",   niche:"SaaS",            source:"Website",      contact:"Angela Park",   phone:"+1 555 201 4432", stage:"New Lead",        followUpDate:"17 Sep 2026", followUpTime:"09:00", daysInStage:1,  calls:0, assigneeInitials:"JC", assigneeName:"James Carter",  assigneeColor:"#2FBEB3", urgency:"upcoming", stale:false },
-  { id:"7",  priority:"warm", company:"Summit Partners",  niche:"Consulting",      source:"Referral",     contact:"Keiko Tanaka",  phone:"+1 555 663 4410", stage:"Meeting Booked", followUpDate:"16 Sep 2026", followUpTime:"14:00", daysInStage:3,  calls:5, assigneeInitials:"AS", assigneeName:"Aisha Santos",  assigneeColor:"#6366F1", urgency:"upcoming" },
-  { id:"8",  priority:"cold", company:"Luminary Co.",     niche:"Fintech",         source:"Cold Call",    contact:"Ben Howell",    phone:"+1 555 887 3310", stage:"New Lead",        followUpDate:"16 Sep 2026", followUpTime:"11:00", daysInStage:14, calls:0, assigneeInitials:"MR", assigneeName:"Marco Rivera",  assigneeColor:"#F59E0B", urgency:"upcoming", stale:true },
-  { id:"9",  priority:"hot",  company:"Crestline Labs",   niche:"Pharma",          source:"LinkedIn",     contact:"Priya Singh",   phone:"+1 555 443 0091", stage:"No Answer",       followUpDate:"15 Sep 2026", followUpTime:"14:00", daysInStage:2,  calls:2, assigneeInitials:"AS", assigneeName:"Aisha Santos",  assigneeColor:"#6366F1", urgency:"today" },
-  { id:"10", priority:"warm", company:"Atlas Holdings",   niche:"Real Estate",     source:"Website",      contact:"Carlos Ruiz",   phone:"+1 555 771 5543", stage:"Try Again",       followUpDate:"15 Sep 2026", followUpTime:"11:30", daysInStage:3,  calls:3, assigneeInitials:"NW", assigneeName:"Natalie Wong",  assigneeColor:"#16A34A", urgency:"today" },
-  { id:"11", priority:"cold", company:"Solaris Group",    niche:"Clean Energy",    source:"Trade Show",   contact:"Emma Novak",    phone:"+1 555 508 1177", stage:"Conversation",   followUpDate:"17 Sep 2026", followUpTime:"09:00", daysInStage:6,  calls:4, assigneeInitials:"MR", assigneeName:"Marco Rivera",  assigneeColor:"#F59E0B", urgency:"upcoming" },
-  { id:"12", priority:"warm", company:"Redwood Capital",  niche:"Investment",      source:"Referral",     contact:"Marcus Webb",   phone:"+1 555 430 8823", stage:"Conversation",   followUpDate:"18 Sep 2026", followUpTime:"13:00", daysInStage:4,  calls:2, assigneeInitials:"NW", assigneeName:"Natalie Wong",  assigneeColor:"#16A34A", urgency:"upcoming" },
-  { id:"13", priority:"warm", company:"Orion Partners",   niche:"Logistics",       source:"Cold Call",    contact:"Julia Chen",    phone:"+1 555 662 7712", stage:"No Answer",       followUpDate:"14 Sep 2026", followUpTime:"09:00", daysInStage:18, calls:1, assigneeInitials:"DK", assigneeName:"Derek Kim",     assigneeColor:"#F97316", urgency:"overdue", stale:true },
-  { id:"14", priority:"cold", company:"Crestview Corp",   niche:"Retail",          source:"Website",      contact:"Liam O'Brien",  phone:"+1 555 335 7720", stage:"Closed Lost",     followUpDate:"—",          followUpTime:"—",     daysInStage:21, calls:3, assigneeInitials:"MR", assigneeName:"Marco Rivera",  assigneeColor:"#F59E0B", urgency:"none" },
-  { id:"15", priority:"warm", company:"Clearpath Media",  niche:"Marketing",       source:"LinkedIn",     contact:"Sofia Reyes",   phone:"+1 555 114 5530", stage:"Estimate Sent",  followUpDate:"20 Sep 2026", followUpTime:"10:00", daysInStage:2,  calls:5, assigneeInitials:"NW", assigneeName:"Natalie Wong",  assigneeColor:"#16A34A", urgency:"upcoming" },
-];
-
-const ASSIGNEES = [
-  { name: "James Carter", initials: "JC", color: "#2FBEB3" },
-  { name: "Aisha Santos", initials: "AS", color: "#6366F1" },
-  { name: "Marco Rivera", initials: "MR", color: "#F59E0B" },
-  { name: "Natalie Wong", initials: "NW", color: "#16A34A" },
-  { name: "Derek Kim", initials: "DK", color: "#F97316" },
-];
+interface AssignableUser {
+  id: string;
+  name: string;
+  initials: string;
+  color: string;
+}
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 
@@ -248,17 +227,25 @@ function rowStyles(lead: ListLead, selected: boolean): CSSProperties {
 
 function BulkActionBar({
   count,
+  assignees,
   onCancel,
   onReassign,
   onDelete,
 }: {
   count: number;
+  assignees: AssignableUser[];
   onCancel: () => void;
   onReassign: (assigneeName: string) => void;
   onDelete: () => void;
 }) {
   const [reassignOpen, setReassignOpen] = useState(false);
-  const [assigneeName, setAssigneeName] = useState(ASSIGNEES[0].name);
+  const [assigneeName, setAssigneeName] = useState(assignees[0]?.name ?? "");
+
+  useEffect(() => {
+    setAssigneeName((current) => (
+      current && assignees.some((assignee) => assignee.name === current) ? current : (assignees[0]?.name ?? "")
+    ));
+  }, [assignees]);
 
   return (
     <div className="relative">
@@ -281,13 +268,14 @@ function BulkActionBar({
               className="h-8 rounded-lg px-2 text-xs outline-none"
               style={{ background: "#1F2937", color: "#E5E7EB", border: "1px solid #374151" }}
             >
-              {ASSIGNEES.map((assignee) => <option key={assignee.name}>{assignee.name}</option>)}
+              {assignees.length === 0 && <option value="">No active users</option>}
+              {assignees.map((assignee) => <option key={assignee.id} value={assignee.name}>{assignee.name}</option>)}
             </select>
           </label>
           <button type="button" onClick={() => setReassignOpen(false)} className="h-8 px-2 rounded-lg text-xs" style={{ background: "transparent", color: "#9CA3AF", border: "1px solid #374151", cursor: "pointer" }}>
             Cancel
           </button>
-          <button type="submit" className="h-8 px-3 rounded-lg text-xs font-medium" style={{ background: "#2FBEB3", color: "#FFFFFF", border: "none", cursor: "pointer" }}>
+          <button type="submit" disabled={!assigneeName} className="h-8 px-3 rounded-lg text-xs font-medium" style={{ background: assigneeName ? "#2FBEB3" : "#6B7280", color: "#FFFFFF", border: "none", cursor: assigneeName ? "pointer" : "not-allowed" }}>
             Confirm
           </button>
         </form>
@@ -410,17 +398,19 @@ function ListTopBar({ role }: { role: UserRole }) {
 function FilterBar({
   filters,
   stages,
+  assignees,
   setFilter,
   search,
   setSearch,
 }: {
   filters: Record<string, string | null>;
   stages: PipelineStage[];
+  assignees: AssignableUser[];
   setFilter: (key: string, val: string | null) => void;
   search: string;
   setSearch: (v: string) => void;
 }) {
-  const assigneeOptions = ASSIGNEES.map((assignee) => assignee.name);
+  const assigneeOptions = assignees.map((assignee) => assignee.name);
   const NICHES    = ["Enterprise SaaS", "Healthcare", "Agency", "Deep Tech", "Infrastructure", "Marketing", "Fintech", "Pharma", "Logistics", "Real Estate", "Consulting", "Investment", "SaaS", "Clean Energy", "Retail", "Media"];
   const PRIORITIES = ["hot", "warm", "cold"];
   const RANGES     = ["Today", "This week", "Next 7 days", "This month", "Overdue"];
@@ -481,6 +471,7 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
   const router = useRouter();
   const { stages } = usePipelineStages();
   const [leads, setLeads] = useState<ListLead[]>([]);
+  const [assignees, setAssignees] = useState<AssignableUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [filters, setFiltersState] = useState<Record<string, string | null>>({
@@ -529,6 +520,20 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
       }
     };
     void loadLeads();
+  }, []);
+
+  useEffect(() => {
+    const loadAssignees = async () => {
+      try {
+        const response = await fetch("/api/users");
+        const result = await response.json() as { users?: Array<AssignableUser & { status: string }> };
+        if (!response.ok) return;
+        setAssignees((result.users ?? []).filter((user) => user.status === "active"));
+      } catch {
+        setAssignees([]);
+      }
+    };
+    void loadAssignees();
   }, []);
 
   const setFilter = (key: string, val: string | null) =>
@@ -585,7 +590,7 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
   };
 
   const handleBulkReassign = async (assigneeName: string) => {
-    const assignee = ASSIGNEES.find((candidate) => candidate.name === assigneeName);
+    const assignee = assignees.find((candidate) => candidate.name === assigneeName);
     if (!assignee || !window.confirm(`Reassign ${selected.size} selected lead${selected.size === 1 ? "" : "s"} to ${assignee.name}?`)) return;
 
     const response = await fetch("/api/leads", {
@@ -617,7 +622,7 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
   return (
     <div className="flex flex-col" style={{ height: "calc(100vh - 64px)" }}>
       <ListTopBar role={role} />
-      <FilterBar filters={filters} stages={stages} setFilter={setFilter} search={search} setSearch={setSearch} />
+      <FilterBar filters={filters} stages={stages} assignees={assignees} setFilter={setFilter} search={search} setSearch={setSearch} />
 
       {/* Table container */}
       <div className="flex-1 overflow-auto" style={{ padding: "16px 20px 80px" }}>
@@ -873,6 +878,7 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
       {bulkActive && (
         <BulkActionBar
           count={selected.size}
+          assignees={assignees}
           onReassign={handleBulkReassign}
           onDelete={handleBulkDelete}
           onCancel={() => setSelected(new Set())}

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { PAGE_ROUTES, pageTitleForPath, pathnameToPage, type UserRole } from "@/lib/types";
-import { useRole } from "@/lib/role-context";
+import { useDisplayName, useRole } from "@/lib/role-context";
 
 export type { UserRole };
 
@@ -130,7 +130,11 @@ function NavItem({
 
 // ─── Sidebar ─────────────────────────────────────────────────────────────────
 
-function Sidebar({ role, onSignOut }: { role: UserRole; onSignOut: () => void }) {
+function initialsOf(name: string) {
+  return (name || "").split(" ").filter(Boolean).map((part) => part[0]).join("").slice(0, 2).toUpperCase() || "?";
+}
+
+function Sidebar({ role, name, onSignOut }: { role: UserRole; name: string; onSignOut: () => void }) {
   const pathname = usePathname();
   const page = pathnameToPage(pathname);
   const [pipelineOpen, setPipelineOpen] = useState(
@@ -235,28 +239,34 @@ function Sidebar({ role, onSignOut }: { role: UserRole; onSignOut: () => void })
 
       <div className="px-3 py-3" style={{ borderTop: "1px solid #E5E7EB" }}>
         <div className="flex items-center gap-2.5">
-          <div
-            className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-white text-xs font-semibold"
-            style={{ background: "#2FBEB3" }}
+          <Link
+            href={PAGE_ROUTES.profile}
+            className="flex items-center gap-2.5 flex-1 min-w-0 rounded-lg"
+            style={{ textDecoration: "none", background: page === "profile" ? "#E3F7F5" : "transparent", padding: 4 }}
           >
-            {role === "superadmin" ? "JC" : "AS"}
-          </div>
-          <div className="flex-1 min-w-0">
-            <div style={{ fontSize: 13, fontWeight: 500, color: "#111111" }} className="truncate">
-              {role === "superadmin" ? "James Carter" : "Aisha Santos"}
-            </div>
-            <span
-              className="inline-block px-1.5 py-0.5 rounded-full text-white"
-              style={{
-                fontSize: 10,
-                fontWeight: 600,
-                background: role === "superadmin" ? "#0E7A70" : "#9CA3AF",
-                lineHeight: 1.4,
-              }}
+            <div
+              className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-white text-xs font-semibold"
+              style={{ background: "#2FBEB3" }}
             >
-              {role === "superadmin" ? "Superadmin" : "Admin"}
-            </span>
-          </div>
+              {initialsOf(name)}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div style={{ fontSize: 13, fontWeight: 500, color: "#111111" }} className="truncate">
+                {name || "Account"}
+              </div>
+              <span
+                className="inline-block px-1.5 py-0.5 rounded-full text-white"
+                style={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  background: role === "superadmin" ? "#0E7A70" : "#9CA3AF",
+                  lineHeight: 1.4,
+                }}
+              >
+                {role === "superadmin" ? "Superadmin" : "Admin"}
+              </span>
+            </div>
+          </Link>
           <button
             type="button"
             onClick={onSignOut}
@@ -274,7 +284,7 @@ function Sidebar({ role, onSignOut }: { role: UserRole; onSignOut: () => void })
 
 // ─── Top bar ──────────────────────────────────────────────────────────────────
 
-function TopBar({ pageTitle, role, onSignOut }: { pageTitle: string; role: UserRole; onSignOut: () => void }) {
+function TopBar({ pageTitle, name, onSignOut }: { pageTitle: string; name: string; onSignOut: () => void }) {
   const [notifOpen, setNotifOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
 
@@ -351,7 +361,7 @@ function TopBar({ pageTitle, role, onSignOut }: { pageTitle: string; role: UserR
             style={{ border: "1px solid #E5E7EB", cursor: "pointer", background: "white" }}
           >
             <div className="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-semibold" style={{ background: "#2FBEB3" }}>
-              {role === "superadmin" ? "JC" : "AS"}
+              {initialsOf(name)}
             </div>
             <ChevronDownIcon />
           </button>
@@ -360,17 +370,22 @@ function TopBar({ pageTitle, role, onSignOut }: { pageTitle: string; role: UserR
               className="absolute right-0 mt-1 rounded-xl shadow-lg border py-1.5"
               style={{ top: "100%", width: 180, background: "white", borderColor: "#E5E7EB", zIndex: 50 }}
             >
-              {["Profile", "Logout"].map((item) => (
-                <button
-                  key={item}
-                  type="button"
-                  onClick={item === "Logout" ? onSignOut : undefined}
-                  className="w-full text-left px-4 py-2 text-sm hover:bg-[#F9FAFB] transition-colors"
-                  style={{ fontSize: 13, color: item === "Logout" ? "#DC2626" : "#111111", background: "none", border: "none", cursor: "pointer" }}
-                >
-                  {item}
-                </button>
-              ))}
+              <Link
+                href={PAGE_ROUTES.profile}
+                onClick={() => setUserOpen(false)}
+                className="block w-full text-left px-4 py-2 hover:bg-[#F9FAFB] transition-colors"
+                style={{ fontSize: 13, color: "#111111", textDecoration: "none" }}
+              >
+                Profile
+              </Link>
+              <button
+                type="button"
+                onClick={onSignOut}
+                className="w-full text-left px-4 py-2 text-sm hover:bg-[#F9FAFB] transition-colors"
+                style={{ fontSize: 13, color: "#DC2626", background: "none", border: "none", cursor: "pointer" }}
+              >
+                Logout
+              </button>
             </div>
           )}
         </div>
@@ -385,6 +400,7 @@ export function Shell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const role = useRole();
+  const { name } = useDisplayName();
   const pageTitle = pageTitleForPath(pathname);
   const handleSignOut = async () => {
     await createClient().auth.signOut();
@@ -394,8 +410,8 @@ export function Shell({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen" style={{ background: "#FAFAFA" }}>
-      <Sidebar role={role} onSignOut={handleSignOut} />
-      <TopBar pageTitle={pageTitle} role={role} onSignOut={handleSignOut} />
+      <Sidebar role={role} name={name} onSignOut={handleSignOut} />
+      <TopBar pageTitle={pageTitle} name={name} onSignOut={handleSignOut} />
       <main style={{ marginLeft: 240, paddingTop: 64, minHeight: "100vh" }}>
         {children}
       </main>

@@ -6,6 +6,7 @@ export type AppPage =
   | "pipeline-list"
   | "followups"
   | "settings"
+  | "profile"
   | "lead-detail"
   | "add-lead"
   | "bulk-import";
@@ -16,6 +17,7 @@ export const PAGE_ROUTES: Record<AppPage, string> = {
   "pipeline-list": "/pipeline/list",
   followups: "/followups",
   settings: "/settings",
+  profile: "/profile",
   "lead-detail": "/leads",
   "add-lead": "/leads/new",
   "bulk-import": "/pipeline/bulk-import",
@@ -28,6 +30,7 @@ export const PAGE_TITLES: Record<string, string> = {
   "/pipeline/bulk-import": "Bulk Import",
   "/followups": "Follow-ups",
   "/settings": "Settings",
+  "/profile": "Profile",
   "/leads/new": "Add Lead",
 };
 
@@ -37,6 +40,7 @@ export function pathnameToPage(pathname: string): AppPage {
   if (pathname.startsWith("/pipeline/list")) return "pipeline-list";
   if (pathname.startsWith("/followups")) return "followups";
   if (pathname.startsWith("/settings")) return "settings";
+  if (pathname.startsWith("/profile")) return "profile";
   if (pathname.startsWith("/leads/new")) return "add-lead";
   if (pathname.startsWith("/leads/")) return "lead-detail";
   return "dashboard";

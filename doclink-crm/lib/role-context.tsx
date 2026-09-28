@@ -5,6 +5,11 @@ import { createClient } from "@/lib/supabase/client";
 import type { UserRole } from "./types";
 
 const RoleContext = createContext<UserRole>("admin");
+const NameContext = createContext<{ name: string; setName: (name: string) => void; setRole: (role: UserRole) => void }>({
+  name: "",
+  setName: () => {},
+  setRole: () => {},
+});
 
 export function RoleProvider({
   role: initialRole = "admin",
@@ -14,6 +19,7 @@ export function RoleProvider({
   children: ReactNode;
 }) {
   const [role, setRole] = useState<UserRole | null>(null);
+  const [name, setName] = useState("");
 
   useEffect(() => {
     let mounted = true;
@@ -24,7 +30,7 @@ export function RoleProvider({
 
       const { data: profile } = await supabase
         .from("users")
-        .select("role,is_active")
+        .select("name,role,is_active")
         .eq("email", user.email)
         .maybeSingle();
 
@@ -36,7 +42,11 @@ export function RoleProvider({
         metadataRole === "superadmin" || metadataRole === "admin" ? metadataRole : null
       );
 
-      if (mounted) setRole(resolvedRole);
+      const profileName = typeof profile?.name === "string" ? profile.name.trim() : "";
+      if (mounted) {
+        setRole(resolvedRole);
+        setName(profileName);
+      }
     });
 
     return () => {
@@ -46,9 +56,17 @@ export function RoleProvider({
 
   if (!role) return null;
 
-  return <RoleContext.Provider value={role}>{children}</RoleContext.Provider>;
+  return (
+    <RoleContext.Provider value={role}>
+      <NameContext.Provider value={{ name, setName, setRole }}>{children}</NameContext.Provider>
+    </RoleContext.Provider>
+  );
 }
 
 export function useRole(): UserRole {
   return useContext(RoleContext);
+}
+
+export function useDisplayName() {
+  return useContext(NameContext);
 }
