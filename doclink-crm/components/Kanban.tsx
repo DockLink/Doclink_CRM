@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { UserRole } from "@/lib/types";
 import { LostReasonModal, type LostReason } from "@/components/LostReasonModal";
-import { assigneeColor, displayDate, initials, type ApiLead, urgencyFor } from "@/lib/lead-ui";
+import { assigneeColor, displayDate, initials, priorityForStage, type ApiLead, urgencyFor } from "@/lib/lead-ui";
 import { activeStages, stageColor, type PipelineStage } from "@/lib/pipeline-stages";
 import { usePipelineStages } from "@/lib/use-pipeline-stages";
 
@@ -563,7 +563,7 @@ export function Kanban({ role }: { role: UserRole }) {
           contact: lead.contact,
           phone: lead.phone,
           priority: lead.priority ?? "cold",
-          followUp: { date: displayDate(lead.followUpDate), urgency: urgencyFor(lead.followUpDate) },
+          followUp: { date: displayDate(lead.followUpDate), urgency: urgencyFor(lead.followUpDate, lead.followUpTime) },
           calls: lead.calls,
           neverContacted: lead.calls === 0,
           assigneeInitials: initials(lead.assigneeName),
@@ -596,6 +596,7 @@ export function Kanban({ role }: { role: UserRole }) {
           ? {
               ...l,
               stage: newStage,
+              priority: priorityForStage(newStage),
               ...(newStage === "Closed Lost" && lostReason ? { lostReason } : {}),
               ...(newStage !== "Closed Lost" ? { lostReason: undefined } : {}),
             }

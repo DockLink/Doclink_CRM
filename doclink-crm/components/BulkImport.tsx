@@ -13,33 +13,75 @@ type ImportRow = Record<string, string>;
 interface ColumnMapping {
   sourceHeader: string;
   targetField: string;
-  confidence: "auto" | "confirm" | "ignored";
+  confidence: "auto" | "confirm" | "manual" | "ignored";
+}
+
+interface ImportResult {
+  imported: number;
+  skipped: number;
+  failed: number;
+  failedRows: Array<{ row: number; error: string }>;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
+const IGNORE_FIELD = "— Ignore field —";
+
 const DOCLINK_FIELDS = [
   "Company", "Contact Name", "Phone", "Niche", "Source",
   "Priority", "Assignee", "Stage", "Follow-up Date", "Notes",
-  "Annual Revenue", "Company Size", "— Ignore field —",
+  "Annual Revenue", "Company Size", IGNORE_FIELD,
 ];
 
-const AUTO_MAPPINGS: Record<string, { field: string; confidence: "auto" | "confirm" }> = {
-  company_name:   { field: "Company",        confidence: "auto" },
-  full_name:      { field: "Contact Name",   confidence: "auto" },
-  mobile:         { field: "Phone",          confidence: "auto" },
-  industry:       { field: "Niche",          confidence: "confirm" },
-  lead_source:    { field: "Source",         confidence: "auto" },
-  priority_level: { field: "Priority",       confidence: "confirm" },
-  owner:          { field: "Assignee",       confidence: "auto" },
-  status:         { field: "Stage",          confidence: "confirm" },
-  next_follow_up: { field: "Follow-up Date", confidence: "auto" },
-};
+// Aliases are compared against headers lowercased with non-alphanumerics removed.
+// `exact` matches are marked auto-detected; `partial` (substring) matches ask for
+// confirmation and are tried in this array's order, so more specific fields come first.
+const FIELD_ALIASES: Array<{ field: string; exact: string[]; partial: string[] }> = [
+  { field: "Follow-up Date", exact: ["followupdate", "followup", "nextfollowup", "nextfollowupdate", "followupon", "callbackdate", "callback", "nextcall", "nextcalldate", "reminderdate", "reminder"], partial: ["followup", "callback", "reminder", "nextcall"] },
+  { field: "Company Size", exact: ["companysize", "size", "employees", "employeecount", "noofemployees", "numberofemployees", "headcount", "teamsize"], partial: ["employee", "headcount", "size"] },
+  { field: "Annual Revenue", exact: ["annualrevenue", "revenue", "turnover", "annualturnover"], partial: ["revenue", "turnover"] },
+  { field: "Phone", exact: ["phone", "phonenumber", "phoneno", "mobile", "mobilenumber", "mobileno", "mob", "contactnumber", "contactno", "cell", "cellphone", "cellnumber", "telephone", "tel", "whatsapp", "whatsappnumber", "whatsappno", "number"], partial: ["phone", "mobile", "whatsapp", "contactno", "contactnumber", "number"] },
+  { field: "Assignee", exact: ["assignee", "assignedto", "assigned", "owner", "leadowner", "salesrep", "rep", "agent", "executive", "salesperson", "salesexecutive", "handledby", "accountmanager"], partial: ["assign", "salesrep", "handledby"] },
+  { field: "Source", exact: ["source", "leadsource", "channel", "origin", "medium", "referral", "referredby", "campaign"], partial: ["source", "channel", "referr"] },
+  { field: "Stage", exact: ["stage", "status", "leadstatus", "pipelinestage", "dealstage", "leadstage"], partial: ["stage", "status"] },
+  { field: "Priority", exact: ["priority", "prioritylevel", "temperature", "leadtemperature", "heat", "rating"], partial: ["priority", "temperature"] },
+  { field: "Niche", exact: ["niche", "industry", "category", "specialty", "speciality", "specialization", "specialisation", "segment", "vertical", "sector", "businesstype", "type"], partial: ["niche", "industry", "special", "category", "sector", "segment"] },
+  { field: "Notes", exact: ["notes", "note", "remarks", "remark", "comments", "comment", "description", "details"], partial: ["note", "remark", "comment", "description"] },
+  { field: "Company", exact: ["company", "companyname", "business", "businessname", "organization", "organisation", "organizationname", "organisationname", "org", "firm", "firmname", "clinic", "clinicname", "hospital", "hospitalname", "account", "accountname", "brand", "brandname", "practice", "practicename"], partial: ["company", "business", "organi", "clinic", "hospital", "firm", "practice"] },
+  { field: "Contact Name", exact: ["contact", "contactname", "contactperson", "name", "fullname", "personname", "customername", "clientname", "leadname", "doctor", "doctorname", "drname", "firstname"], partial: ["contact", "person", "doctor", "name"] },
+];
+
+function normalizeHeader(header: string) {
+  return header.toLowerCase().replace(/\s*\(\d+\)$/, "").replace(/[^a-z0-9]/g, "");
+}
+
+function autoMapColumns(headers: string[]): ColumnMapping[] {
+  const normalized = headers.map(normalizeHeader);
+  const mapped: Array<ColumnMapping | undefined> = headers.map(() => undefined);
+  const usedFields = new Set<string>();
+
+  for (const { field, exact } of FIELD_ALIASES) {
+    const index = normalized.findIndex((header, i) => !mapped[i] && exact.includes(header));
+    if (index === -1) continue;
+    mapped[index] = { sourceHeader: headers[index], targetField: field, confidence: "auto" };
+    usedFields.add(field);
+  }
+
+  for (const { field, partial } of FIELD_ALIASES) {
+    if (usedFields.has(field)) continue;
+    const index = normalized.findIndex((header, i) => !mapped[i] && partial.some((keyword) => header.includes(keyword)));
+    if (index === -1) continue;
+    mapped[index] = { sourceHeader: headers[index], targetField: field, confidence: "confirm" };
+    usedFields.add(field);
+  }
+
+  return headers.map((header, i) => mapped[i] ?? { sourceHeader: header, targetField: IGNORE_FIELD, confidence: "ignored" });
+}
 
 function parseDelimitedText(value: string) {
   const lines = value.split(/\r?\n/).filter((line) => line.trim());
   if (lines.length < 2) return { headers: [], rows: [] as ImportRow[] };
-  const delimiter = lines[0].includes("\t") ? "\t" : ",";
+  const delimiter = lines[0].includes("\t") ? "\t" : lines[0].includes("|") ? "|" : ",";
   const parseLine = (line: string) => {
     const values: string[] = [];
     let current = "";
@@ -73,7 +115,7 @@ function uniqueHeaders(headers: string[]) {
 }
 
 function parseSpreadsheet(buffer: ArrayBuffer) {
-  const workbook = XLSX.read(buffer, { type: "array" });
+  const workbook = XLSX.read(buffer, { type: "array", raw: true, dateNF: "yyyy-mm-dd" });
   const worksheet = workbook.Sheets[workbook.SheetNames[0]];
   if (!worksheet) return [] as ImportRow[];
 
@@ -81,10 +123,12 @@ function parseSpreadsheet(buffer: ArrayBuffer) {
     header: 1,
     defval: "",
     raw: false,
+    dateNF: "yyyy-mm-dd",
   });
-  const headerRow = table[0] ?? [];
-  const headers = uniqueHeaders(headerRow.map((value) => String(value)));
-  return table.slice(1)
+  const headerIndex = table.findIndex((row) => row.some((value) => String(value ?? "").trim()));
+  if (headerIndex === -1) return [] as ImportRow[];
+  const headers = uniqueHeaders(table[headerIndex].map((value) => String(value ?? "")));
+  return table.slice(headerIndex + 1)
     .filter((row) => row.some((value) => String(value).trim()))
     .map((row) => Object.fromEntries(headers.map((header, index) => [header, String(row[index] ?? "").trim()])));
 }
@@ -389,17 +433,26 @@ function Step1({ onNext }: { onNext: (rows: ImportRow[], assigneeName: string) =
 
 // ─── Step 2: Map Columns ──────────────────────────────────────────────────────
 
-function Step2({ rows, onNext, onBack }: { rows: ImportRow[]; onNext: (mappings: ColumnMapping[]) => void; onBack: () => void }) {
-  const sourceHeaders = Object.keys(rows[0] ?? {});
-  const [mappings, setMappings] = useState<ColumnMapping[]>(
-    sourceHeaders.map((h) => {
-      const m = AUTO_MAPPINGS[h];
-      return { sourceHeader: h, targetField: m?.field ?? "— Ignore field —", confidence: m?.confidence ?? "ignored" };
-    })
-  );
+function Step2({ rows, initialMappings, onNext, onBack }: {
+  rows: ImportRow[];
+  initialMappings: ColumnMapping[];
+  onNext: (mappings: ColumnMapping[]) => void;
+  onBack: () => void;
+}) {
+  const [mappings, setMappings] = useState<ColumnMapping[]>(() => {
+    const sourceHeaders = Object.keys(rows[0] ?? {});
+    const sameHeaders = initialMappings.length === sourceHeaders.length
+      && initialMappings.every((mapping, i) => mapping.sourceHeader === sourceHeaders[i]);
+    return sameHeaders ? initialMappings : autoMapColumns(sourceHeaders);
+  });
+  const companyMapped = mappings.some((m) => m.targetField === "Company");
 
   const setField = (idx: number, field: string) => {
-    setMappings((prev) => prev.map((m, i) => i === idx ? { ...m, targetField: field, confidence: field === "— Ignore field —" ? "ignored" : m.confidence } : m));
+    setMappings((prev) => prev.map((m, i) => {
+      if (i === idx) return { ...m, targetField: field, confidence: field === IGNORE_FIELD ? "ignored" : "manual" };
+      if (field !== IGNORE_FIELD && m.targetField === field) return { ...m, targetField: IGNORE_FIELD, confidence: "ignored" };
+      return m;
+    }));
   };
 
   return (
@@ -453,6 +506,12 @@ function Step2({ rows, onNext, onBack }: { rows: ImportRow[]; onNext: (mappings:
                 Please confirm
               </span>
             )}
+            {m.confidence === "manual" && (
+              <span className="flex items-center gap-1 rounded-full px-2.5 py-1 w-fit" style={{ fontSize: 11, fontWeight: 700, background: "#E3F7F5", color: "#0E7A70" }}>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+                Mapped
+              </span>
+            )}
             {m.confidence === "ignored" && (
               <span style={{ fontSize: 11, color: "#9CA3AF" }}>Ignored</span>
             )}
@@ -460,10 +519,17 @@ function Step2({ rows, onNext, onBack }: { rows: ImportRow[]; onNext: (mappings:
         ))}
       </div>
 
+      {!companyMapped && (
+        <p role="alert" className="flex items-center gap-2" style={{ fontSize: 12, color: "#DC2626" }}>
+          <WarningIcon size={14} />
+          Map one of your columns to the Company field — it is required for every lead.
+        </p>
+      )}
+
       {/* Footer */}
       <div className="flex items-center justify-between pt-2" style={{ borderTop: "1px solid #E3E7EF" }}>
         <Btn variant="secondary" onClick={onBack}>← Back</Btn>
-        <Btn onClick={() => onNext(mappings)}>Continue to Preview →</Btn>
+        <Btn onClick={() => onNext(mappings)} disabled={!companyMapped}>Continue to Preview →</Btn>
       </div>
     </div>
   );
@@ -475,7 +541,7 @@ function Step3({ rows, mappings, assigneeName, onNext, onBack }: {
   rows: ImportRow[];
   mappings: ColumnMapping[];
   assigneeName: string;
-  onNext: (result: { imported: number; skipped: number; failed: number }) => void;
+  onNext: (result: ImportResult) => void;
   onBack: () => void;
 }) {
   const [dupAction, setDupAction] = useState<DuplicateAction>("skip");
@@ -486,19 +552,26 @@ function Step3({ rows, mappings, assigneeName, onNext, onBack }: {
   const previewRows = rows.slice(0, 5);
 
   const mappedHeaders = mappings
-    .filter((mapping) => mapping.targetField !== "— Ignore field —")
+    .filter((mapping) => mapping.targetField !== IGNORE_FIELD)
     .map((mapping) => ({ key: mapping.sourceHeader, label: mapping.targetField }));
 
   useEffect(() => {
     const findDuplicates = async () => {
-      const response = await fetch("/api/leads");
-      if (!response.ok) return;
-      const result = await response.json() as { leads?: Array<{ company: string; phone: string }> };
-      const existing = new Set((result.leads ?? []).map((lead) => `${lead.company.toLowerCase()}|${lead.phone}`));
-      const companyHeader = mappings.find((mapping) => mapping.targetField === "Company")?.sourceHeader;
-      const phoneHeader = mappings.find((mapping) => mapping.targetField === "Phone")?.sourceHeader;
-      if (!companyHeader || !phoneHeader) return;
-      setDuplicates(rows.filter((row) => existing.has(`${row[companyHeader].toLowerCase()}|${row[phoneHeader]}`)).length);
+      try {
+        const response = await fetch("/api/leads");
+        if (!response.ok) return;
+        const result = await response.json() as { leads?: Array<{ company: string; phone: string }> };
+        const existing = new Set((result.leads ?? []).map((lead) => `${(lead.company ?? "").trim().toLowerCase()}|${lead.phone ?? ""}`));
+        const companyHeader = mappings.find((mapping) => mapping.targetField === "Company")?.sourceHeader;
+        const phoneHeader = mappings.find((mapping) => mapping.targetField === "Phone")?.sourceHeader;
+        if (!companyHeader || !phoneHeader) return;
+        setDuplicates(rows.filter((row) => {
+          const phone = (row[phoneHeader] ?? "").trim();
+          return phone && existing.has(`${(row[companyHeader] ?? "").trim().toLowerCase()}|${phone}`);
+        }).length);
+      } catch {
+        // The duplicate count is informational; the import API still enforces duplicate handling.
+      }
     };
     void findDuplicates();
   }, [mappings, rows]);
@@ -517,12 +590,13 @@ function Step3({ rows, mappings, assigneeName, onNext, onBack }: {
           assigneeName,
         }),
       });
-      const result = await response.json() as { imported?: number; skipped?: number; failedRows?: unknown[]; error?: string };
+      const result = await response.json().catch(() => ({})) as { imported?: number; skipped?: number; failedRows?: ImportResult["failedRows"]; error?: string };
       if (!response.ok) {
-        setError(result.error ?? "Unable to import leads.");
+        setError(result.error ?? `Unable to import leads (server responded ${response.status}).`);
         return;
       }
-      onNext({ imported: result.imported ?? 0, skipped: result.skipped ?? 0, failed: result.failedRows?.length ?? 0 });
+      const failedRows = result.failedRows ?? [];
+      onNext({ imported: result.imported ?? 0, skipped: result.skipped ?? 0, failed: failedRows.length, failedRows });
     } catch {
       setError("Unable to reach the server. Please try again.");
     } finally {
@@ -621,7 +695,7 @@ function Step3({ rows, mappings, assigneeName, onNext, onBack }: {
 
 // ─── Step 4: Done ─────────────────────────────────────────────────────────────
 
-function Step4({ result, onRestart, onViewPipeline }: { result: { imported: number; skipped: number; failed: number }; onRestart: () => void; onViewPipeline: () => void }) {
+function Step4({ result, onRestart, onViewPipeline }: { result: ImportResult; onRestart: () => void; onViewPipeline: () => void }) {
   const stats = [
     { label: "Imported",          value: result.imported, bg: "#DCFCE7", color: "#16A34A", valueBg: "#16A34A" },
     { label: "Skipped Duplicates", value: result.skipped,  bg: "#FEF3C7", color: "#B45309", valueBg: "#D97706" },
@@ -660,6 +734,20 @@ function Step4({ result, onRestart, onViewPipeline }: { result: { imported: numb
         ))}
       </div>
 
+      {result.failedRows.length > 0 && (
+        <div className="w-full rounded-lg px-4 py-3" style={{ maxWidth: 480, background: "#FEF2F2", border: "1px solid #FECACA" }}>
+          <p style={{ fontSize: 12, fontWeight: 700, color: "#B91C1C", marginBottom: 6 }}>Rows that could not be imported</p>
+          <ul className="flex flex-col gap-1">
+            {result.failedRows.slice(0, 10).map((failure) => (
+              <li key={failure.row} style={{ fontSize: 12, color: "#7F1D1D" }}>Row {failure.row}: {failure.error}</li>
+            ))}
+          </ul>
+          {result.failedRows.length > 10 && (
+            <p style={{ fontSize: 11, color: "#B91C1C", marginTop: 6 }}>…and {result.failedRows.length - 10} more</p>
+          )}
+        </div>
+      )}
+
       {/* Actions */}
       <div className="flex flex-col items-center gap-3">
         <Btn onClick={onViewPipeline}>View in Pipeline</Btn>
@@ -687,7 +775,7 @@ export function BulkImport({ initialStep = 1, onNavigate }: BulkImportProps) {
   const [rows, setRows] = useState<ImportRow[]>([]);
   const [mappings, setMappings] = useState<ColumnMapping[]>([]);
   const [assigneeName, setAssigneeName] = useState("");
-  const [result, setResult] = useState({ imported: 0, skipped: 0, failed: 0 });
+  const [result, setResult] = useState<ImportResult>({ imported: 0, skipped: 0, failed: 0, failedRows: [] });
 
   return (
     <div
@@ -708,8 +796,8 @@ export function BulkImport({ initialStep = 1, onNavigate }: BulkImportProps) {
         <StepIndicator current={step} />
 
         {/* Step content */}
-        {step === 1 && <Step1 onNext={(nextRows, nextAssignee) => { setRows(nextRows); setAssigneeName(nextAssignee); setStep(2); }} />}
-        {step === 2 && <Step2 rows={rows} onNext={(nextMappings) => { setMappings(nextMappings); setStep(3); }} onBack={() => setStep(1)} />}
+        {step === 1 && <Step1 onNext={(nextRows, nextAssignee) => { setRows(nextRows); setMappings([]); setAssigneeName(nextAssignee); setStep(2); }} />}
+        {step === 2 && <Step2 rows={rows} initialMappings={mappings} onNext={(nextMappings) => { setMappings(nextMappings); setStep(3); }} onBack={() => setStep(1)} />}
         {step === 3 && <Step3 rows={rows} mappings={mappings} assigneeName={assigneeName} onNext={(nextResult) => { setResult(nextResult); setStep(4); }} onBack={() => setStep(2)} />}
         {step === 4 && (
           <Step4

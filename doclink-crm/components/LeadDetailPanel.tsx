@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, type ReactNode } from "react";
 import type { UserRole } from "@/lib/types";
-import { assigneeColor, initials } from "@/lib/lead-ui";
+import { assigneeColor, initials, priorityForStage } from "@/lib/lead-ui";
 import { nextStageName, stageColor, type PipelineStage } from "@/lib/pipeline-stages";
 import { usePipelineStages } from "@/lib/use-pipeline-stages";
 import { LogCallModal, type LogCallForm } from "@/components/LogCallModal";
@@ -929,6 +929,7 @@ export function LeadDetailPanel({ role, leadId, initialTab = "details", onClose,
     setLead((prev) => prev ? ({
       ...prev,
       stage: newStage,
+      priority: priorityForStage(newStage),
       ...(newStage === "Closed Lost" && lostReason ? { lostReason } : {}),
       ...(newStage !== "Closed Lost" ? { lostReason: undefined } : {}),
     }) : prev);

@@ -1,7 +1,9 @@
 "use client";
 
-import type { CSSProperties, ReactNode } from "react";
-import type { UserRole } from "@/lib/types";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import Link from "next/link";
+import { PAGE_ROUTES, type UserRole } from "@/lib/types";
+import { urgencyFor } from "@/lib/lead-ui";
 import { stageColor } from "@/lib/pipeline-stages";
 import { usePipelineStages } from "@/lib/use-pipeline-stages";
 import {
@@ -14,11 +16,15 @@ import {
 
 // ─── Date/time formatting helpers ──────────────────────────────────────────
 
+// follow_up_time is a Postgres TIME column serialized as 1970-01-01THH:MM:00Z,
+// so the UTC components are the wall-clock time the user entered.
 function fmtTime(time: string | null) {
   if (!time) return "—";
   const d = new Date(time);
   if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+  const hours = d.getUTCHours();
+  const minutes = String(d.getUTCMinutes()).padStart(2, "0");
+  return `${hours % 12 || 12}:${minutes} ${hours >= 12 ? "PM" : "AM"}`;
 }
 
 function fmtRelativeDay(dateStr: string | null) {
@@ -85,13 +91,13 @@ function SectionLabel({ children }: { children: ReactNode }) {
   );
 }
 
-function ViewAllLink() {
+function ViewAllLink({ section }: { section: "today" | "missed" | "upcoming" }) {
   return (
-    <a href="#" onClick={(e) => e.preventDefault()} style={{ fontSize: 12, color: "#2FBEB3", fontWeight: 500, textDecoration: "none" }}
+    <Link href={`${PAGE_ROUTES.followups}#${section}`} style={{ fontSize: 12, color: "#2FBEB3", fontWeight: 500, textDecoration: "none" }}
       onMouseEnter={(e) => ((e.currentTarget as HTMLAnchorElement).style.color = "#0E7A70")}
       onMouseLeave={(e) => ((e.currentTarget as HTMLAnchorElement).style.color = "#2FBEB3")}>
       View all →
-    </a>
+    </Link>
   );
 }
 
@@ -106,7 +112,7 @@ function TodayFollowupsCard({ items }: { items: DashboardFollowUp[] }) {
     <Card style={{ padding: "16px 20px", flex: 1, minWidth: 0 }}>
       <div className="flex items-center justify-between mb-3">
         <h3 style={{ fontSize: 14, fontWeight: 600, color: "#111111" }}>Today&apos;s Follow-ups</h3>
-        <ViewAllLink />
+        <ViewAllLink section="today" />
       </div>
       <div className="flex flex-col">
         {items.length === 0 && <EmptyRow label="No follow-ups scheduled for today." />}
@@ -142,7 +148,7 @@ function MissedFollowupsCard({ items }: { items: DashboardFollowUp[] }) {
     >
       <div className="flex items-center justify-between mb-3">
         <h3 style={{ fontSize: 14, fontWeight: 600, color: "#DC2626" }}>Missed Follow-ups</h3>
-        <ViewAllLink />
+        <ViewAllLink section="missed" />
       </div>
       <div className="flex flex-col">
         {items.length === 0 && <EmptyRow label="No missed follow-ups." />}
@@ -157,7 +163,7 @@ function MissedFollowupsCard({ items }: { items: DashboardFollowUp[] }) {
               className="shrink-0 px-1.5 py-0.5 rounded"
               style={{ fontSize: 11, fontWeight: 600, color: "#DC2626", background: "#FEF2F2", minWidth: 44, textAlign: "center" }}
             >
-              {fmtRelativeDay(item.followUpDate)}
+              {fmtRelativeDay(item.followUpDate) === "Today" ? fmtTime(item.followUpTime) : fmtRelativeDay(item.followUpDate)}
             </span>
             <div className="flex-1 min-w-0">
               <div style={{ fontSize: 13, fontWeight: 500, color: "#111111" }} className="truncate">{item.company}</div>
@@ -185,7 +191,7 @@ function UpcomingFollowupsCard({ items }: { items: DashboardFollowUp[] }) {
         <h3 style={{ fontSize: 14, fontWeight: 600, color: "#111111" }}>
           Upcoming <span style={{ fontWeight: 400, color: "#9CA3AF", fontSize: 12 }}>— next 7 days</span>
         </h3>
-        <ViewAllLink />
+        <ViewAllLink section="upcoming" />
       </div>
       <div className="flex flex-col">
         {items.length === 0 && <EmptyRow label="Nothing coming up in the next 7 days." />}
@@ -460,8 +466,18 @@ function LostReasonCard({ reasons }: { reasons: DashboardLostReason[] }) {
 
 // ─── Dashboard root ────────────────────────────────────────────────────────────
 
+function useNow(intervalMs = 60_000) {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), intervalMs);
+    return () => window.clearInterval(timer);
+  }, [intervalMs]);
+  return now;
+}
+
 export function Dashboard({ role }: { role: UserRole }) {
   const { data, loading, error, reload } = useDashboardData();
+  const now = useNow();
 
   if (loading && !data) {
     return <div style={{ padding: 24, fontSize: 13, color: "#6B7280" }}>Loading dashboard…</div>;
@@ -484,6 +500,13 @@ export function Dashboard({ role }: { role: UserRole }) {
   }
 
   if (!data) return null;
+
+  const lapsed = data.followUps.today.filter(
+    (item) => urgencyFor(item.followUpDate, item.followUpTime, now) === "overdue",
+  );
+  const todayFollowUps = data.followUps.today.filter((item) => !lapsed.includes(item));
+  const missedFollowUps = [...data.followUps.missed, ...lapsed];
+  const kpis = { ...data.kpis, missedFollowUpsCount: data.kpis.missedFollowUpsCount + lapsed.length };
 
   return (
     <div style={{ padding: 24 }}>
@@ -509,8 +532,8 @@ export function Dashboard({ role }: { role: UserRole }) {
       <div className="mb-6">
         <SectionLabel>Follow-up Summary</SectionLabel>
         <div className="flex gap-4">
-          <TodayFollowupsCard items={data.followUps.today} />
-          <MissedFollowupsCard items={data.followUps.missed} />
+          <TodayFollowupsCard items={todayFollowUps} />
+          <MissedFollowupsCard items={missedFollowUps} />
           <UpcomingFollowupsCard items={data.followUps.upcoming} />
         </div>
       </div>
@@ -518,7 +541,7 @@ export function Dashboard({ role }: { role: UserRole }) {
       {/* Section 2 — KPIs */}
       <div className="mb-6">
         <SectionLabel>Sales Performance</SectionLabel>
-        <KPISection kpis={data.kpis} />
+        <KPISection kpis={kpis} />
       </div>
 
       {/* Section 3 — Pipeline health */}
@@ -527,7 +550,7 @@ export function Dashboard({ role }: { role: UserRole }) {
         <PipelineHealthCard
           stages={data.pipelineHealth.stages}
           totalLeads={data.pipelineHealth.totalLeads}
-          overdueCount={data.pipelineHealth.overdueCount}
+          overdueCount={data.pipelineHealth.overdueCount + lapsed.length}
         />
       </div>
 

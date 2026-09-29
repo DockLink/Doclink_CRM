@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, type ReactNode } from "react";
 import type { UserRole } from "@/lib/types";
 import { activeStages, stageColor } from "@/lib/pipeline-stages";
 import { usePipelineStages } from "@/lib/use-pipeline-stages";
+import { priorityForStage } from "@/lib/lead-ui";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -363,12 +364,16 @@ export function AddLeadModal({ mode = "add", role, showValidation = false, onClo
     setForm((prev) => {
       if (options.some((stage) => stage.name === prev.stage)) return prev;
       const fallback = options.find((stage) => stage.isDefault) ?? options[0];
-      return { ...prev, stage: fallback.name };
+      return { ...prev, stage: fallback.name, priority: priorityForStage(fallback.name) };
     });
   }, [stages]);
 
   const set = <K extends keyof LeadForm>(key: K, val: LeadForm[K]) => {
-    setForm((prev) => ({ ...prev, [key]: val }));
+    setForm((prev) => ({
+      ...prev,
+      [key]: val,
+      ...(key === "stage" ? { priority: priorityForStage(val as string) } : {}),
+    }));
     if (key === "company" && submitted) {
       setErrors((prev) => ({ ...prev, company: val ? undefined : "Company name is required" }));
     }

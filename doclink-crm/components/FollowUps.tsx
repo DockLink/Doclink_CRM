@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import type { UserRole } from "@/lib/types";
-import { type ApiLead, urgencyFor } from "@/lib/lead-ui";
+import { type ApiLead, localDateKey, urgencyFor } from "@/lib/lead-ui";
 import { stageColor } from "@/lib/pipeline-stages";
 import { usePipelineStages } from "@/lib/use-pipeline-stages";
 import { LogCallModal, type LogCallForm } from "@/components/LogCallModal";
@@ -31,13 +31,6 @@ interface FollowUp {
   notes: string;
 }
 
-function localDateKey(date = new Date()) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
 function storedDateKey(iso: string | null) {
   return iso ? iso.slice(0, 10) : "";
 }
@@ -56,8 +49,13 @@ function timeParts(iso: string | null) {
   };
 }
 
-function overdueLabel(dateKey: string) {
-  const today = new Date();
+function overdueLabel(dateKey: string, time: string, now = new Date()) {
+  if (dateKey === localDateKey(now) && time !== "99:99") {
+    const [hours, minutes] = time.split(":").map(Number);
+    const late = Math.max(1, now.getHours() * 60 + now.getMinutes() - (hours * 60 + minutes));
+    return late < 60 ? `Overdue by ${late}m` : `Overdue by ${Math.floor(late / 60)}h`;
+  }
+  const today = new Date(now);
   today.setHours(0, 0, 0, 0);
   const [year, month, day] = dateKey.split("-").map(Number);
   const target = new Date(year, month - 1, day);
@@ -65,15 +63,23 @@ function overdueLabel(dateKey: string) {
   return `Overdue by ${days}d`;
 }
 
+function classify(dateKey: string, time: string, now = new Date()): Pick<FollowUp, "urgency" | "overdueLabel"> | null {
+  const urgency = urgencyFor(
+    `${dateKey}T00:00:00.000Z`,
+    time === "99:99" ? null : `1970-01-01T${time}:00.000Z`,
+    now,
+  );
+  if (urgency === "none") return null;
+  if (urgency === "upcoming" && dateKey > localDateKey(new Date(now.getTime() + 7 * 86_400_000))) return null;
+  return { urgency, overdueLabel: urgency === "overdue" ? overdueLabel(dateKey, time, now) : undefined };
+}
+
 function toFollowUp(lead: ApiLead): FollowUp | null {
   if (!lead.followUpDate) return null;
-  const urgency = urgencyFor(lead.followUpDate);
-  if (urgency === "none") return null;
   const date = storedDateKey(lead.followUpDate);
   const time = timeParts(lead.followUpTime);
-  const today = localDateKey();
-  const horizon = localDateKey(new Date(Date.now() + 7 * 86_400_000));
-  if (urgency === "upcoming" && (date <= today || date > horizon)) return null;
+  const status = classify(date, time.sort);
+  if (!status) return null;
   return {
     id: lead.id,
     company: lead.company,
@@ -85,8 +91,7 @@ function toFollowUp(lead: ApiLead): FollowUp | null {
     date,
     time: time.sort,
     timeLabel: time.label,
-    urgency,
-    overdueLabel: urgency === "overdue" ? overdueLabel(date) : undefined,
+    ...status,
     assignee: lead.assigneeName,
     calls: lead.calls,
     notes: [outcomeLabel(lead.lastOutcome), lead.lastNotes].filter(Boolean).join(" — "),
@@ -353,14 +358,17 @@ function FollowUpRow({
 // ─── Section card ─────────────────────────────────────────────────────────────
 
 function SectionCard({
+  id,
   children,
   accentLeft,
 }: {
+  id?: string;
   children: ReactNode;
   accentLeft?: string;
 }) {
   return (
     <div
+      id={id}
       className="rounded-xl overflow-hidden"
       style={{
         background: "#FFFFFF",
@@ -494,6 +502,23 @@ export function FollowUps({ role }: { role: UserRole }) {
     void load();
   }, []);
 
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const now = new Date();
+      setItems((prev) => prev.flatMap((item) => {
+        const status = classify(item.date, item.time, now);
+        return status ? [{ ...item, ...status }] : [];
+      }));
+    }, 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (loading) return;
+    const hash = window.location.hash.slice(1);
+    if (hash) document.getElementById(hash)?.scrollIntoView({ block: "start" });
+  }, [loading]);
+
   const openLeadDetails = (lead: FollowUp) => router.push(`/leads/${lead.id}`);
 
   const patchFollowUp = async (leadId: string, followUpDate: string | null, followUpTime: string | null) => {
@@ -509,20 +534,17 @@ export function FollowUps({ role }: { role: UserRole }) {
   };
 
   const applySchedule = (leadId: string, date: string, time: string) => {
-    const isoDate = `${date}T00:00:00.000Z`;
-    const isoTime = `1970-01-01T${time}:00.000Z`;
-    const urgency = urgencyFor(isoDate);
-    const clock = timeParts(isoTime);
+    const clock = timeParts(`1970-01-01T${time}:00.000Z`);
+    const status = classify(date, clock.sort);
     setItems((prev) => prev.flatMap((item) => {
       if (item.id !== leadId) return [item];
-      if (urgency === "none" || urgency === "upcoming" && date > localDateKey(new Date(Date.now() + 7 * 86_400_000))) return [];
+      if (!status) return [];
       return [{
         ...item,
         date,
         time: clock.sort,
         timeLabel: clock.label,
-        urgency,
-        overdueLabel: urgency === "overdue" ? overdueLabel(date) : undefined,
+        ...status,
       }];
     }));
   };
@@ -574,7 +596,7 @@ export function FollowUps({ role }: { role: UserRole }) {
   };
 
   const todays = items.filter((f) => f.urgency === "today").sort((a, b) => a.time.localeCompare(b.time));
-  const missed = items.filter((f) => f.urgency === "overdue").sort((a, b) => a.date.localeCompare(b.date));
+  const missed = items.filter((f) => f.urgency === "overdue").sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
   const upcoming = items.filter((f) => f.urgency === "upcoming").sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
 
   // Group upcoming by date
@@ -599,7 +621,7 @@ export function FollowUps({ role }: { role: UserRole }) {
       {error && <p style={{ fontSize: 13, color: "#DC2626" }}>{error}</p>}
 
       {/* ── Section 1: Today */}
-      <SectionCard>
+      <SectionCard id="today">
         <SectionHeader title="Today's Follow-ups" count={todays.length} />
         {todays.length === 0 ? (
           <EmptyState message="No follow-ups scheduled for today." />
@@ -613,7 +635,7 @@ export function FollowUps({ role }: { role: UserRole }) {
       </SectionCard>
 
       {/* ── Section 2: Missed */}
-      <SectionCard accentLeft="#DC2626">
+      <SectionCard id="missed" accentLeft="#DC2626">
         <SectionHeader title="Missed Follow-ups" count={missed.length} accentColor="#DC2626" />
         {missed.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-3 py-12">
@@ -632,7 +654,7 @@ export function FollowUps({ role }: { role: UserRole }) {
       </SectionCard>
 
       {/* ── Section 3: Upcoming */}
-      <SectionCard>
+      <SectionCard id="upcoming">
         <SectionHeader title="Upcoming Follow-ups" count={upcoming.length} />
         {upcomingDates.length === 0 ? (
           <EmptyState message="No upcoming follow-ups in the next 7 days." />

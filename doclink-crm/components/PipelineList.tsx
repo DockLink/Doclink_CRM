@@ -510,7 +510,7 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
             assigneeInitials: initials(lead.assigneeName),
             assigneeName: lead.assigneeName,
             assigneeColor: assigneeColor(lead.assigneeName),
-            urgency: urgencyFor(lead.followUpDate),
+            urgency: urgencyFor(lead.followUpDate, lead.followUpTime),
           };
         }));
       } catch {

@@ -67,7 +67,7 @@ export function useDashboardData() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch("/api/dashboard");
+      const response = await fetch(`/api/dashboard?tzOffset=${new Date().getTimezoneOffset()}`);
       const result = (await response.json()) as DashboardData & { error?: string };
       if (!response.ok) throw new Error(result.error ?? "Unable to load dashboard data.");
       setData(result);

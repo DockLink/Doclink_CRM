@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { createClient } from "@/lib/supabase/server";
+import { priorityForStage, type LeadPriority } from "@/lib/lead-ui";
 
 const priorityValues = new Set(["hot", "warm", "cold"]);
 
@@ -96,7 +97,7 @@ export async function POST(request: Request) {
     ? await prisma.leadSource.upsert({ where: { name: sourceName }, update: {}, create: { name: sourceName } })
     : null;
   const rawPriority = text(body.priority).toLowerCase();
-  const priority = priorityValues.has(rawPriority) ? rawPriority as "hot" | "warm" | "cold" : undefined;
+  const priority = priorityValues.has(rawPriority) ? rawPriority as LeadPriority : priorityForStage(stage.name);
   const lead = await prisma.lead.create({
     data: {
       company,
@@ -121,12 +122,13 @@ export async function PATCH(request: Request) {
   const ids = Array.isArray(body.ids) ? body.ids.filter((id): id is string => typeof id === "string") : [];
   if (ids.length === 0) return NextResponse.json({ error: "At least one lead id is required" }, { status: 400 });
 
-  const data: { stageId?: string; assigneeId?: string; stageChangedAt?: Date; lostReason?: string | null } = {};
+  const data: { stageId?: string; assigneeId?: string; stageChangedAt?: Date; lostReason?: string | null; priority?: LeadPriority } = {};
   if (body.stage) {
     const stage = await prisma.pipelineStage.findFirst({ where: { name: text(body.stage), isActive: true } });
     if (!stage) return NextResponse.json({ error: "Selected stage was not found" }, { status: 400 });
     data.stageId = stage.id;
     data.stageChangedAt = new Date();
+    data.priority = priorityForStage(stage.name);
     data.lostReason = body.stage === "Closed Lost" ? text(body.lostReason) || null : null;
   }
   if (body.assigneeName) {

@@ -122,18 +122,50 @@ export async function GET(request: Request) {
     return row;
   });
 
+  const header = [
+    "Company",
+    "Niche",
+    "Contact",
+    "Phone",
+    "Stage",
+    "Assignee",
+    "Source",
+    "Priority",
+    "Follow-up Date",
+    "Proposal Sent",
+    "Lost Reason",
+    "Calls Logged",
+    "Created At",
+    ...customFieldLabels,
+  ];
+
   const filename = `leads-export-${new Date().toISOString().slice(0, 10)}.${format}`;
-  const worksheet = XLSX.utils.json_to_sheet(rows);
+  const worksheet = XLSX.utils.json_to_sheet(rows, { header });
 
   if (format === "csv") {
-    const csv = XLSX.utils.sheet_to_csv(worksheet);
-    return new NextResponse(csv, {
+    // BOM so Excel detects UTF-8 when opening the CSV directly
+    const csv = "\uFEFF" + XLSX.utils.sheet_to_csv(worksheet);
+    const body = new TextEncoder().encode(csv);
+    return new NextResponse(body, {
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
         "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Length": String(body.byteLength),
+        "Cache-Control": "no-store",
       },
     });
   }
 
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, "Leads");
+  const xlsxBuffer = XLSX.write(workbook, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
 
+  return new NextResponse(xlsxBuffer, {
+    headers: {
+      "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "Content-Disposition": `attachment; filename="${filename}"`,
+      "Content-Length": String(xlsxBuffer.byteLength),
+      "Cache-Control": "no-store",
+    },
+  });
 }

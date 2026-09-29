@@ -264,11 +264,133 @@ function AddUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
   );
 }
 
+async function patchUser(body: { id: string; name?: string; email?: string; role?: UserRole; password?: string; isActive?: boolean }) {
+  try {
+    const response = await fetch("/api/users", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const result = await response.json().catch(() => ({})) as { user?: User; error?: string };
+    if (!response.ok || !result.user) return { error: result.error ?? "Unable to update user." };
+    return { user: result.user };
+  } catch {
+    return { error: "Unable to reach the server. Please try again." };
+  }
+}
+
+function EditUserModal({ user, onClose, onSaved }: { user: User; onClose: () => void; onSaved: (user: User) => void }) {
+  const [name, setName] = useState(user.name);
+  const [email, setEmail] = useState(user.email);
+  const [role, setRole] = useState<UserRole>(user.role);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    setError("");
+    if (!name.trim() || !email.trim()) {
+      setError("Name and email are required.");
+      return;
+    }
+    setSaving(true);
+    const result = await patchUser({ id: user.id, name, email, role });
+    setSaving(false);
+    if (result.error || !result.user) {
+      setError(result.error ?? "Unable to update user.");
+      return;
+    }
+    onSaved(result.user);
+    onClose();
+  };
+
+  return (
+    <Modal title="Edit User" onClose={onClose} footer={
+      <>
+        <SecondaryBtn onClick={onClose}>Cancel</SecondaryBtn>
+        <PrimaryBtn onClick={() => void save()} disabled={saving}>{saving ? "Saving..." : "Save Changes"}</PrimaryBtn>
+      </>
+    }>
+      <FormField label="Full Name" required><TextInput value={name} onChange={setName} /></FormField>
+      <FormField label="Email Address" required><TextInput value={email} onChange={setEmail} type="email" /></FormField>
+      <FormField label="Role">
+        <select value={role} onChange={(e) => setRole(e.target.value as UserRole)} className="w-full rounded-lg px-3 appearance-none" style={{ height: 36, border: "1.5px solid #E3E7EF", fontSize: 13, color: "#111111", background: "#FFFFFF", outline: "none" }}>
+          <option value="admin">Admin</option>
+          <option value="superadmin">Superadmin</option>
+        </select>
+      </FormField>
+      {error && <p role="alert" style={{ fontSize: 12, color: "#DC2626" }}>{error}</p>}
+    </Modal>
+  );
+}
+
+function ResetPasswordModal({ user, onClose }: { user: User; onClose: () => void }) {
+  const [password, setPassword] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [done, setDone] = useState(false);
+
+  const generate = () => {
+    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$";
+    setPassword(Array.from({ length: 14 }, () => chars[Math.floor(Math.random() * chars.length)]).join(""));
+  };
+
+  const copy = () => { navigator.clipboard.writeText(password).catch(() => {}); setCopied(true); setTimeout(() => setCopied(false), 1500); };
+
+  const save = async () => {
+    setError("");
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters.");
+      return;
+    }
+    setSaving(true);
+    const result = await patchUser({ id: user.id, password });
+    setSaving(false);
+    if (result.error) {
+      setError(result.error);
+      return;
+    }
+    setDone(true);
+  };
+
+  return (
+    <Modal title={`Reset Password — ${user.name}`} onClose={onClose} footer={
+      done ? (
+        <PrimaryBtn onClick={onClose}>Done</PrimaryBtn>
+      ) : (
+        <>
+          <SecondaryBtn onClick={onClose}>Cancel</SecondaryBtn>
+          <PrimaryBtn onClick={() => void save()} disabled={saving}>{saving ? "Resetting..." : "Reset Password"}</PrimaryBtn>
+        </>
+      )
+    }>
+      <FormField label="New Password" required>
+        <div className="flex gap-2">
+          <div className="flex-1">
+            <TextInput value={password} onChange={setPassword} placeholder="Generate or type a password" />
+          </div>
+          {!done && <button onClick={generate} className="rounded-lg font-semibold shrink-0" style={{ height: 36, paddingInline: 12, fontSize: 12, background: "#E3F7F5", color: "#0E7A70", border: "1px solid #A7F3D0" }}>Generate</button>}
+          {password && (
+            <button onClick={copy} className="flex items-center justify-center rounded-lg shrink-0" style={{ width: 36, height: 36, background: copied ? "#E3F7F5" : "#F3F4F6", color: copied ? "#2FBEB3" : "#6B7280" }}>
+              {copied ? <CheckIcon /> : <CopyIcon />}
+            </button>
+          )}
+        </div>
+      </FormField>
+      {done && <p style={{ fontSize: 12, color: "#16A34A" }}>Password updated. Share the new password with {user.email}.</p>}
+      {error && <p role="alert" style={{ fontSize: 12, color: "#DC2626" }}>{error}</p>}
+    </Modal>
+  );
+}
+
 function UsersFrame() {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [actionError, setActionError] = useState("");
   const [showAdd, setShowAdd] = useState(false);
+  const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [resettingUser, setResettingUser] = useState<User | null>(null);
 
   useEffect(() => {
     const loadUsers = async () => {
@@ -289,11 +411,22 @@ function UsersFrame() {
     void loadUsers();
   }, []);
 
-  const toggleStatus = (id: string) => setUsers((prev) => prev.map((u) => u.id === id ? { ...u, status: u.status === "active" ? "inactive" : "active" } : u));
+  const replaceUser = (user: User) => setUsers((prev) => prev.map((u) => (u.id === user.id ? user : u)));
+
+  const toggleStatus = async (user: User) => {
+    setActionError("");
+    const result = await patchUser({ id: user.id, isActive: user.status !== "active" });
+    if (result.error || !result.user) {
+      setActionError(result.error ?? "Unable to update user.");
+      return;
+    }
+    replaceUser(result.user);
+  };
 
   return (
     <div>
       <SectionHeader title="User Management" action={<PrimaryBtn onClick={() => setShowAdd(true)}>+ Add User</PrimaryBtn>} />
+      {actionError && <p role="alert" style={{ fontSize: 13, color: "#DC2626", marginBottom: 12 }}>{actionError}</p>}
       <TableCard>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
@@ -333,10 +466,10 @@ function UsersFrame() {
                   </td>
                   <td style={{ padding: "12px 16px" }}>
                     <div className="flex items-center justify-end gap-1">
-                      <IconBtn title="Edit"><PencilIcon /></IconBtn>
-                      <IconBtn title="Reset password"><KeyIcon /></IconBtn>
+                      <IconBtn title="Edit" onClick={() => setEditingUser(u)}><PencilIcon /></IconBtn>
+                      <IconBtn title="Reset password" onClick={() => setResettingUser(u)}><KeyIcon /></IconBtn>
                       <span title={u.role === "superadmin" ? "Cannot deactivate superadmin" : ""}>
-                        <Toggle on={u.status === "active"} onChange={() => u.role !== "superadmin" && toggleStatus(u.id)} />
+                        <Toggle on={u.status === "active"} onChange={() => { if (u.role !== "superadmin") void toggleStatus(u); }} />
                       </span>
                     </div>
                   </td>
@@ -347,6 +480,8 @@ function UsersFrame() {
         </table>
       </TableCard>
       {showAdd && <AddUserModal onClose={() => setShowAdd(false)} onCreated={(user) => setUsers((prev) => [...prev, user])} />}
+      {editingUser && <EditUserModal user={editingUser} onClose={() => setEditingUser(null)} onSaved={replaceUser} />}
+      {resettingUser && <ResetPasswordModal user={resettingUser} onClose={() => setResettingUser(null)} />}
     </div>
   );
 }
@@ -1054,7 +1189,7 @@ function ExportFrame() {
         }
       }
 
-      const blob = new Blob(chunks as BlobPart[]);
+      const blob = new Blob(chunks as BlobPart[], { type: response.headers.get("Content-Type") ?? "application/octet-stream" });
       const filename = parseFilenameFromHeader(response.headers.get("Content-Disposition"), `leads-export.${format}`);
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -1063,7 +1198,7 @@ function ExportFrame() {
       document.body.appendChild(a);
       a.click();
       a.remove();
-      URL.revokeObjectURL(url);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
 
       setToastProgress(100);
       setToastDone(true);

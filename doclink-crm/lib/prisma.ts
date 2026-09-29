@@ -15,6 +15,10 @@ function createPrismaClient() {
     adapter: new PrismaPg({
       connectionString,
       ssl: { rejectUnauthorized: false },
+      // Opening a TLS connection to the remote pooler costs 1-2s, so keep idle
+      // connections around instead of pg's 10s default.
+      idleTimeoutMillis: 5 * 60_000,
+      keepAlive: true,
     }),
   });
 }
