@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useRef, useEffect, forwardRef, type ReactNode } from "react";
+import { useState, useRef, useEffect, useMemo, forwardRef, type ReactNode } from "react";
 import type { UserRole } from "@/lib/types";
 import type { PipelineStage } from "@/lib/pipeline-stages";
 import { usePipelineStages } from "@/lib/use-pipeline-stages";
+import { clearDraft, readDraft, useFormDraft } from "@/lib/use-form-draft";
 
 // ─── Sub-nav sections ─────────────────────────────────────────────────────────
 
@@ -181,14 +182,21 @@ interface User {
   color: string;
 }
 
+interface UserDraft { name: string; email: string; role: UserRole }
+
 function AddUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: (user: User) => void }) {
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+  const [initial] = useState<UserDraft>(() => ({ name: "", email: "", role: "admin", ...readDraft<Partial<UserDraft>>("settings:new-user") }));
+  const [name, setName] = useState(initial.name);
+  const [email, setEmail] = useState(initial.email);
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState<UserRole>("admin");
+  const [role, setRole] = useState<UserRole>(initial.role);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const userDraft = useMemo<UserDraft>(() => ({ name, email, role }), [name, email, role]);
+  const clearUserDraft = useFormDraft("settings:new-user", userDraft, {
+    isEmpty: (value) => !value.name.trim() && !value.email.trim() && value.role === "admin",
+  });
 
   const generate = () => {
     const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$";
@@ -220,6 +228,7 @@ function AddUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
         setError(result.error ?? "Unable to create user.");
         return;
       }
+      clearUserDraft();
       onCreated(result.user);
       onClose();
     } catch {
@@ -232,7 +241,7 @@ function AddUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
   return (
     <Modal title="Add New User" onClose={onClose} footer={
       <>
-        <SecondaryBtn onClick={onClose}>Cancel</SecondaryBtn>
+        <SecondaryBtn onClick={() => { clearUserDraft(); onClose(); }}>Cancel</SecondaryBtn>
         <PrimaryBtn onClick={() => void createUser()}>{saving ? "Creating..." : "Create User"}</PrimaryBtn>
       </>
     }>
@@ -280,11 +289,17 @@ async function patchUser(body: { id: string; name?: string; email?: string; role
 }
 
 function EditUserModal({ user, onClose, onSaved }: { user: User; onClose: () => void; onSaved: (user: User) => void }) {
-  const [name, setName] = useState(user.name);
-  const [email, setEmail] = useState(user.email);
-  const [role, setRole] = useState<UserRole>(user.role);
+  const draftKey = `settings:user:${user.id}`;
+  const [initial] = useState<UserDraft>(() => ({ name: user.name, email: user.email, role: user.role, ...readDraft<Partial<UserDraft>>(draftKey) }));
+  const [name, setName] = useState(initial.name);
+  const [email, setEmail] = useState(initial.email);
+  const [role, setRole] = useState<UserRole>(initial.role);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const userDraft = useMemo<UserDraft>(() => ({ name, email, role }), [name, email, role]);
+  const clearUserDraft = useFormDraft(draftKey, userDraft, {
+    isEmpty: (value) => value.name === user.name && value.email === user.email && value.role === user.role,
+  });
 
   const save = async () => {
     setError("");
@@ -299,6 +314,7 @@ function EditUserModal({ user, onClose, onSaved }: { user: User; onClose: () => 
       setError(result.error ?? "Unable to update user.");
       return;
     }
+    clearUserDraft();
     onSaved(result.user);
     onClose();
   };
@@ -306,7 +322,7 @@ function EditUserModal({ user, onClose, onSaved }: { user: User; onClose: () => 
   return (
     <Modal title="Edit User" onClose={onClose} footer={
       <>
-        <SecondaryBtn onClick={onClose}>Cancel</SecondaryBtn>
+        <SecondaryBtn onClick={() => { clearUserDraft(); onClose(); }}>Cancel</SecondaryBtn>
         <PrimaryBtn onClick={() => void save()} disabled={saving}>{saving ? "Saving..." : "Save Changes"}</PrimaryBtn>
       </>
     }>
@@ -490,6 +506,10 @@ function UsersFrame() {
 
 type Stage = PipelineStage;
 
+const DEFAULT_STAGE_COLOR = "#2FBEB3";
+
+interface StageDraft { name: string; color: string }
+
 const PRESET_COLORS = ["#94A3B8","#FB923C","#F97316","#38BDF8","#6366F1","#F59E0B","#0891B2","#16A34A","#57534E","#DC2626","#EC4899","#8B5CF6","#06B6D4","#84CC16"];
 
 function StagesFrame() {
@@ -497,8 +517,13 @@ function StagesFrame() {
   const [stages, setStages] = useState<Stage[]>([]);
   const [error, setError] = useState("");
   const [showAdd, setShowAdd] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [newColor, setNewColor] = useState("#2FBEB3");
+  const [initialNewStage] = useState(() => ({ name: "", color: DEFAULT_STAGE_COLOR, ...readDraft<Partial<StageDraft>>("settings:new-stage") }));
+  const [newName, setNewName] = useState(initialNewStage.name);
+  const [newColor, setNewColor] = useState(initialNewStage.color);
+  const newStage = useMemo<StageDraft>(() => ({ name: newName, color: newColor }), [newName, newColor]);
+  useFormDraft("settings:new-stage", newStage, {
+    isEmpty: (value) => !value.name.trim() && value.color === DEFAULT_STAGE_COLOR,
+  });
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState<Stage | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
@@ -583,7 +608,7 @@ function StagesFrame() {
         return;
       }
       setNewName("");
-      setNewColor("#2FBEB3");
+      setNewColor(DEFAULT_STAGE_COLOR);
       setShowAdd(false);
       await reload();
     } catch {
@@ -671,7 +696,9 @@ function StagesFrame() {
           onClose={() => setEditing(null)}
           onSave={async (name, color) => {
             const saved = await patchStage({ id: editing.id, name, color });
-            if (saved) setEditing(null);
+            if (!saved) return;
+            clearDraft(`settings:stage:${editing.id}`);
+            setEditing(null);
           }}
         />
       )}
@@ -690,8 +717,14 @@ function ColorPicker({ value, onChange }: { value: string; onChange: (color: str
 }
 
 function EditStageModal({ stage, onClose, onSave }: { stage: Stage; onClose: () => void; onSave: (name: string, color: string) => void }) {
-  const [name, setName] = useState(stage.name);
-  const [color, setColor] = useState(stage.color);
+  const draftKey = `settings:stage:${stage.id}`;
+  const [initial] = useState<StageDraft>(() => ({ name: stage.name, color: stage.color, ...readDraft<Partial<StageDraft>>(draftKey) }));
+  const [name, setName] = useState(initial.name);
+  const [color, setColor] = useState(initial.color);
+  const stageDraft = useMemo<StageDraft>(() => ({ name, color }), [name, color]);
+  const clearStageDraft = useFormDraft(draftKey, stageDraft, {
+    isEmpty: (value) => value.name === stage.name && value.color === stage.color,
+  });
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center" style={{ background: "rgba(15,27,60,0.3)" }} onClick={onClose}>
       <div className="rounded-xl flex flex-col gap-4 p-5" style={{ width: 340, background: "#FFFFFF", border: "1px solid #E3E7EF", boxShadow: "0 8px 32px rgba(15,27,60,0.14)" }} onClick={(e) => e.stopPropagation()}>
@@ -702,7 +735,7 @@ function EditStageModal({ stage, onClose, onSave }: { stage: Stage; onClose: () 
           <ColorPicker value={color} onChange={setColor} />
         </div>
         <div className="flex justify-end gap-2 pt-1">
-          <SecondaryBtn onClick={onClose}>Cancel</SecondaryBtn>
+          <SecondaryBtn onClick={() => { clearStageDraft(); onClose(); }}>Cancel</SecondaryBtn>
           <PrimaryBtn onClick={() => { if (name.trim()) onSave(name.trim(), color); }}>Save</PrimaryBtn>
         </div>
       </div>
@@ -755,11 +788,27 @@ function SourcesFrame() {
   const [sources, setSources] = useState<Source[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [newName, setNewName] = useState("");
+  const [newName, setNewName] = useState(() => readDraft<string>("settings:new-source") ?? "");
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const newNameRef = useRef<HTMLInputElement>(null);
+  useFormDraft("settings:new-source", newName, { isEmpty: (value) => !value.trim() });
+  const editingSource = sources.find((s) => s.id === editingId);
+  const renameDraftKey = (id: string) => `settings:source:${id}`;
+  useFormDraft(editingSource ? renameDraftKey(editingSource.id) : null, editValue, {
+    isEmpty: (value) => !editingSource || value === editingSource.name,
+  });
+
+  const startRename = (source: Source) => {
+    setEditingId(source.id);
+    setEditValue(readDraft<string>(renameDraftKey(source.id)) ?? source.name);
+  };
+
+  const cancelRename = (id: string) => {
+    clearDraft(renameDraftKey(id));
+    setEditingId(null);
+  };
 
   const load = async () => {
     setLoading(true);
@@ -812,6 +861,7 @@ function SourcesFrame() {
       });
       const result = await response.json() as { source?: Source; error?: string };
       if (!response.ok || !result.source) { setError(result.error ?? "Unable to rename source."); return; }
+      clearDraft(renameDraftKey(id));
       setSources((prev) => prev.map((s) => (s.id === id ? result.source! : s)));
       setEditingId(null);
     } catch {
@@ -856,7 +906,7 @@ function SourcesFrame() {
             {editingId === s.id ? (
               <div style={{ flex: 1 }}>
                 <TextInput value={editValue} onChange={setEditValue}
-                  onKeyDown={(e) => { if (e.key === "Enter") void saveRename(s.id); if (e.key === "Escape") setEditingId(null); }} />
+                  onKeyDown={(e) => { if (e.key === "Enter") void saveRename(s.id); if (e.key === "Escape") cancelRename(s.id); }} />
               </div>
             ) : (
               <span style={{ flex: 1, fontSize: 13, fontWeight: 500, color: "#111111" }}>{s.name}</span>
@@ -865,11 +915,11 @@ function SourcesFrame() {
             {editingId === s.id ? (
               <>
                 <IconBtn title="Save" onClick={() => void saveRename(s.id)}><CheckIcon /></IconBtn>
-                <IconBtn title="Cancel" onClick={() => setEditingId(null)}><XIcon /></IconBtn>
+                <IconBtn title="Cancel" onClick={() => cancelRename(s.id)}><XIcon /></IconBtn>
               </>
             ) : (
               <>
-                <IconBtn title="Edit" onClick={() => { setEditingId(s.id); setEditValue(s.name); }}><PencilIcon /></IconBtn>
+                <IconBtn title="Edit" onClick={() => startRename(s)}><PencilIcon /></IconBtn>
                 <span title={s.leads > 0 ? `In use by ${s.leads} leads` : "Remove"}>
                   <IconBtn danger={s.leads === 0} title={s.leads > 0 ? `In use by ${s.leads} leads` : "Remove"} disabled={s.leads > 0} onClick={() => void removeSource(s)}>
                     <TrashIcon />
@@ -899,14 +949,28 @@ const FIELD_TYPE_META: Record<FieldType, { label: string; color: string; bg: str
   url:      { label: "URL",      color: "#2563EB", bg: "#DBEAFE" },
 };
 
+interface CustomFieldDraft { label: string; type: FieldType; required: boolean; options: string[] }
+
 function AddCustomFieldModal({ initial, onClose, onSaved }: { initial?: CustomField; onClose: () => void; onSaved: (field: CustomField) => void }) {
-  const [label, setLabel] = useState(initial?.label ?? "");
-  const [type, setType] = useState<FieldType>(initial?.type ?? "text");
-  const [required, setRequired] = useState(initial?.required ?? false);
-  const [options, setOptions] = useState<string[]>(initial?.options?.length ? initial.options : ["Option 1"]);
+  const draftKey = initial ? `settings:custom-field:${initial.id}` : "settings:new-custom-field";
+  const [baseline] = useState<CustomFieldDraft>(() => ({
+    label: initial?.label ?? "",
+    type: initial?.type ?? "text",
+    required: initial?.required ?? false,
+    options: initial?.options?.length ? initial.options : ["Option 1"],
+  }));
+  const [restored] = useState<CustomFieldDraft>(() => ({ ...baseline, ...readDraft<Partial<CustomFieldDraft>>(draftKey) }));
+  const [label, setLabel] = useState(restored.label);
+  const [type, setType] = useState<FieldType>(restored.type);
+  const [required, setRequired] = useState(restored.required);
+  const [options, setOptions] = useState<string[]>(restored.options);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const isEdit = Boolean(initial);
+  const fieldDraft = useMemo<CustomFieldDraft>(() => ({ label, type, required, options }), [label, type, required, options]);
+  const clearFieldDraft = useFormDraft(draftKey, fieldDraft, {
+    isEmpty: (value) => JSON.stringify(value) === JSON.stringify(baseline),
+  });
 
   const save = async () => {
     setError("");
@@ -926,6 +990,7 @@ function AddCustomFieldModal({ initial, onClose, onSaved }: { initial?: CustomFi
       });
       const result = await response.json() as { field?: CustomField; error?: string };
       if (!response.ok || !result.field) { setError(result.error ?? "Unable to save field."); return; }
+      clearFieldDraft();
       onSaved(result.field);
       onClose();
     } catch {
@@ -938,7 +1003,7 @@ function AddCustomFieldModal({ initial, onClose, onSaved }: { initial?: CustomFi
   return (
     <Modal title={isEdit ? "Edit Custom Field" : "Add Custom Field"} onClose={onClose} footer={
       <>
-        <SecondaryBtn onClick={onClose}>Cancel</SecondaryBtn>
+        <SecondaryBtn onClick={() => { clearFieldDraft(); onClose(); }}>Cancel</SecondaryBtn>
         <PrimaryBtn onClick={() => void save()}>{saving ? "Saving..." : "Save Field"}</PrimaryBtn>
       </>
     }>

@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useRef, useEffect, type ReactNode, type CSSProperties, type DragEvent } from "react";
+import { useState, useRef, useEffect, useMemo, type ReactNode, type CSSProperties, type DragEvent, type Dispatch, type SetStateAction } from "react";
 import * as XLSX from "xlsx";
 import type { UserRole } from "@/lib/types";
 import { REVENUE_CURRENCIES, type RevenueCurrency } from "@/lib/lead-custom-fields";
+import { isSensitiveField, readDraft, useFormDraft } from "@/lib/use-form-draft";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -22,6 +23,38 @@ interface ImportResult {
   skipped: number;
   failed: number;
   failedRows: Array<{ row: number; error: string }>;
+}
+
+interface UploadState {
+  fileName: string | null;
+  pasteMode: boolean;
+  pasteText: string;
+  assignee: string;
+  rows: ImportRow[];
+}
+
+interface BulkImportDraft {
+  step: Step;
+  upload: Omit<UploadState, "rows"> & { rows: ImportRow[] | null };
+  rows: ImportRow[];
+  mappings: ColumnMapping[];
+  assigneeName: string;
+  revenueCurrency: RevenueCurrency;
+  duplicateAction: DuplicateAction;
+}
+
+const BULK_IMPORT_DRAFT_KEY = "leads:bulk-import";
+
+const EMPTY_UPLOAD: UploadState = { fileName: null, pasteMode: false, pasteText: "", assignee: "", rows: [] };
+
+function isBlankImport(draft: BulkImportDraft) {
+  if (draft.step === 4) return true;
+  return draft.step === 1 && !draft.upload.fileName && !draft.upload.pasteText.trim() && !draft.upload.rows?.length && draft.rows.length === 0;
+}
+
+function hasSensitiveColumn(pasteText: string) {
+  const header = pasteText.split(/\r?\n/).find((line) => line.trim()) ?? "";
+  return header.split(/[\t|,]/).some((column) => isSensitiveField(column));
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -273,14 +306,15 @@ function StepIndicator({ current }: { current: Step }) {
 
 // ─── Step 1: Upload ───────────────────────────────────────────────────────────
 
-function Step1({ onNext }: { onNext: (rows: ImportRow[], assigneeName: string) => void }) {
+function Step1({ upload, onUploadChange, onNext }: {
+  upload: UploadState;
+  onUploadChange: Dispatch<SetStateAction<UploadState>>;
+  onNext: (rows: ImportRow[], assigneeName: string) => void;
+}) {
+  const { fileName: file, pasteMode, pasteText, assignee, rows } = upload;
+  const update = (patch: Partial<UploadState>) => onUploadChange((prev) => ({ ...prev, ...patch }));
   const [dragging, setDragging] = useState(false);
-  const [file, setFile] = useState<string | null>(null);
-  const [pasteMode, setPasteMode] = useState(false);
-  const [pasteText, setPasteText] = useState("");
-  const [assignee, setAssignee] = useState("");
   const [assignees, setAssignees] = useState<string[]>([]);
-  const [rows, setRows] = useState<ImportRow[]>([]);
   const [fileError, setFileError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -292,23 +326,23 @@ function Step1({ onNext }: { onNext: (rows: ImportRow[], assigneeName: string) =
         if (!response.ok) return;
         const activeUsers = (result.users ?? []).filter((user) => user.status === "active").map((user) => user.name);
         setAssignees(activeUsers);
-        if (activeUsers.length > 0) setAssignee(activeUsers[0]);
+        if (activeUsers.length > 0) onUploadChange((prev) => (prev.assignee ? prev : { ...prev, assignee: activeUsers[0] }));
       } catch {
         // The import API will return the actionable authentication/configuration error.
       }
     };
     void loadAssignees();
-  }, []);
+  }, [onUploadChange]);
 
   const readFile = async (file: File) => {
     setFileError("");
-    setFile(file.name);
+    update({ fileName: file.name });
     try {
       const parsedRows = parseSpreadsheet(await file.arrayBuffer());
-      setRows(parsedRows);
+      update({ rows: parsedRows });
       if (parsedRows.length === 0) setFileError("No data rows were found in this file.");
     } catch {
-      setRows([]);
+      update({ rows: [] });
       setFileError("This file could not be read. Please upload a valid CSV or Excel file.");
     }
   };
@@ -329,7 +363,7 @@ function Step1({ onNext }: { onNext: (rows: ImportRow[], assigneeName: string) =
           <SelectField
             value={assignee}
             options={assignees}
-            onChange={setAssignee}
+            onChange={(value) => update({ assignee: value })}
           />
         </div>
       </div>
@@ -356,7 +390,7 @@ function Step1({ onNext }: { onNext: (rows: ImportRow[], assigneeName: string) =
               <FileIcon />
               <span style={{ fontSize: 14, fontWeight: 600, color: "#111111" }}>{file}</span>
               <button
-                onClick={(e) => { e.stopPropagation(); setFile(null); setRows([]); setFileError(""); }}
+                onClick={(e) => { e.stopPropagation(); update({ fileName: null, rows: [] }); setFileError(""); }}
                 style={{ fontSize: 11, color: "#DC2626", marginLeft: 8, fontWeight: 600 }}
               >
                 Remove
@@ -390,7 +424,7 @@ function Step1({ onNext }: { onNext: (rows: ImportRow[], assigneeName: string) =
         <button
           className="flex items-center gap-2 font-semibold mb-3"
           style={{ fontSize: 13, color: pasteMode ? "#0E7A70" : "#2FBEB3" }}
-          onClick={() => setPasteMode((v) => !v)}
+          onClick={() => update({ pasteMode: !pasteMode })}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points={pasteMode ? "18 15 12 9 6 15" : "6 9 12 15 18 9"}/></svg>
           Paste Data
@@ -400,7 +434,7 @@ function Step1({ onNext }: { onNext: (rows: ImportRow[], assigneeName: string) =
           <div className="flex flex-col gap-3">
             <textarea
               value={pasteText}
-              onChange={(e) => setPasteText(e.target.value)}
+              onChange={(e) => update({ pasteText: e.target.value })}
               placeholder={"Paste tab or pipe-separated data here…\nExample: Company\tContact\tPhone\nMeridian Corp\tSarah Blake\t+1 555 340 9921"}
               rows={5}
               className="w-full rounded-lg px-3 py-2.5 resize-none"
@@ -411,7 +445,7 @@ function Step1({ onNext }: { onNext: (rows: ImportRow[], assigneeName: string) =
             <div className="flex justify-end">
               <Btn variant="secondary" onClick={() => {
                 const parsed = parseDelimitedText(pasteText);
-                setRows(parsed.rows);
+                update({ rows: parsed.rows });
               }}>
                 Parse Pasted Data
               </Btn>
@@ -435,25 +469,24 @@ function Step1({ onNext }: { onNext: (rows: ImportRow[], assigneeName: string) =
 
 // ─── Step 2: Map Columns ──────────────────────────────────────────────────────
 
-function Step2({ rows, initialMappings, revenueCurrency, onRevenueCurrencyChange, onNext, onBack }: {
+function Step2({ rows, mappings: currentMappings, onMappingsChange: setMappings, revenueCurrency, onRevenueCurrencyChange, onNext, onBack }: {
   rows: ImportRow[];
-  initialMappings: ColumnMapping[];
+  mappings: ColumnMapping[];
+  onMappingsChange: (mappings: ColumnMapping[]) => void;
   revenueCurrency: RevenueCurrency;
   onRevenueCurrencyChange: (currency: RevenueCurrency) => void;
   onNext: (mappings: ColumnMapping[]) => void;
   onBack: () => void;
 }) {
-  const [mappings, setMappings] = useState<ColumnMapping[]>(() => {
-    const sourceHeaders = Object.keys(rows[0] ?? {});
-    const sameHeaders = initialMappings.length === sourceHeaders.length
-      && initialMappings.every((mapping, i) => mapping.sourceHeader === sourceHeaders[i]);
-    return sameHeaders ? initialMappings : autoMapColumns(sourceHeaders);
-  });
+  const sourceHeaders = Object.keys(rows[0] ?? {});
+  const sameHeaders = currentMappings.length === sourceHeaders.length
+    && currentMappings.every((mapping, i) => mapping.sourceHeader === sourceHeaders[i]);
+  const mappings = sameHeaders ? currentMappings : autoMapColumns(sourceHeaders);
   const companyMapped = mappings.some((m) => m.targetField === "Company");
   const revenueMapped = mappings.some((m) => m.targetField === "Monthly Revenue");
 
   const setField = (idx: number, field: string) => {
-    setMappings((prev) => prev.map((m, i) => {
+    setMappings(mappings.map((m, i) => {
       if (i === idx) return { ...m, targetField: field, confidence: field === IGNORE_FIELD ? "ignored" : "manual" };
       if (field !== IGNORE_FIELD && m.targetField === field) return { ...m, targetField: IGNORE_FIELD, confidence: "ignored" };
       return m;
@@ -556,15 +589,16 @@ function Step2({ rows, initialMappings, revenueCurrency, onRevenueCurrencyChange
 
 // ─── Step 3: Preview & Confirm ────────────────────────────────────────────────
 
-function Step3({ rows, mappings, assigneeName, revenueCurrency, onNext, onBack }: {
+function Step3({ rows, mappings, assigneeName, revenueCurrency, dupAction, onDupActionChange: setDupAction, onNext, onBack }: {
   rows: ImportRow[];
   mappings: ColumnMapping[];
   assigneeName: string;
   revenueCurrency: RevenueCurrency;
+  dupAction: DuplicateAction;
+  onDupActionChange: (action: DuplicateAction) => void;
   onNext: (result: ImportResult) => void;
   onBack: () => void;
 }) {
-  const [dupAction, setDupAction] = useState<DuplicateAction>("skip");
   const [duplicates, setDuplicates] = useState(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -792,12 +826,41 @@ interface BulkImportProps {
 }
 
 export function BulkImport({ initialStep = 1, onNavigate }: BulkImportProps) {
-  const [step, setStep] = useState<Step>(initialStep);
-  const [rows, setRows] = useState<ImportRow[]>([]);
-  const [mappings, setMappings] = useState<ColumnMapping[]>([]);
-  const [assigneeName, setAssigneeName] = useState("");
-  const [revenueCurrency, setRevenueCurrency] = useState<RevenueCurrency>("Rs");
+  const [restored] = useState(() => readDraft<BulkImportDraft>(BULK_IMPORT_DRAFT_KEY));
+  const [step, setStep] = useState<Step>(() => (restored && restored.rows.length > 0 ? restored.step : initialStep));
+  const [upload, setUpload] = useState<UploadState>(() => (
+    restored ? { ...EMPTY_UPLOAD, ...restored.upload, rows: restored.upload.rows ?? restored.rows } : EMPTY_UPLOAD
+  ));
+  const [rows, setRows] = useState<ImportRow[]>(restored?.rows ?? []);
+  const [mappings, setMappings] = useState<ColumnMapping[]>(restored?.mappings ?? []);
+  const [assigneeName, setAssigneeName] = useState(restored?.assigneeName ?? "");
+  const [revenueCurrency, setRevenueCurrency] = useState<RevenueCurrency>(restored?.revenueCurrency ?? "Rs");
+  const [dupAction, setDupAction] = useState<DuplicateAction>(restored?.duplicateAction ?? "skip");
   const [result, setResult] = useState<ImportResult>({ imported: 0, skipped: 0, failed: 0, failedRows: [] });
+
+  const draft = useMemo<BulkImportDraft>(() => ({
+    step,
+    upload: {
+      ...upload,
+      pasteText: hasSensitiveColumn(upload.pasteText) ? "" : upload.pasteText,
+      rows: upload.rows === rows ? null : upload.rows,
+    },
+    rows,
+    mappings,
+    assigneeName,
+    revenueCurrency,
+    duplicateAction: dupAction,
+  }), [step, upload, rows, mappings, assigneeName, revenueCurrency, dupAction]);
+  const clearDraft = useFormDraft(BULK_IMPORT_DRAFT_KEY, draft, { isEmpty: isBlankImport });
+
+  const restart = () => {
+    setUpload(EMPTY_UPLOAD);
+    setRows([]);
+    setMappings([]);
+    setAssigneeName("");
+    setDupAction("skip");
+    setStep(1);
+  };
 
   return (
     <div
@@ -818,13 +881,13 @@ export function BulkImport({ initialStep = 1, onNavigate }: BulkImportProps) {
         <StepIndicator current={step} />
 
         {/* Step content */}
-        {step === 1 && <Step1 onNext={(nextRows, nextAssignee) => { setRows(nextRows); setMappings([]); setAssigneeName(nextAssignee); setStep(2); }} />}
-        {step === 2 && <Step2 rows={rows} initialMappings={mappings} revenueCurrency={revenueCurrency} onRevenueCurrencyChange={setRevenueCurrency} onNext={(nextMappings) => { setMappings(nextMappings); setStep(3); }} onBack={() => setStep(1)} />}
-        {step === 3 && <Step3 rows={rows} mappings={mappings} assigneeName={assigneeName} revenueCurrency={revenueCurrency} onNext={(nextResult) => { setResult(nextResult); setStep(4); }} onBack={() => setStep(2)} />}
+        {step === 1 && <Step1 upload={upload} onUploadChange={setUpload} onNext={(nextRows, nextAssignee) => { setRows(nextRows); setMappings([]); setAssigneeName(nextAssignee); setStep(2); }} />}
+        {step === 2 && <Step2 rows={rows} mappings={mappings} onMappingsChange={setMappings} revenueCurrency={revenueCurrency} onRevenueCurrencyChange={setRevenueCurrency} onNext={(nextMappings) => { setMappings(nextMappings); setStep(3); }} onBack={() => setStep(1)} />}
+        {step === 3 && <Step3 rows={rows} mappings={mappings} assigneeName={assigneeName} revenueCurrency={revenueCurrency} dupAction={dupAction} onDupActionChange={setDupAction} onNext={(nextResult) => { clearDraft(); setResult(nextResult); setStep(4); }} onBack={() => setStep(2)} />}
         {step === 4 && (
           <Step4
             result={result}
-            onRestart={() => setStep(1)}
+            onRestart={restart}
             onViewPipeline={() => onNavigate?.("pipeline-list")}
           />
         )}

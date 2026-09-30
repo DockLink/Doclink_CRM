@@ -1,12 +1,15 @@
 "use client";
 
-import { useState, useRef, useEffect, type ReactNode } from "react";
+import { useState, useRef, useEffect, useMemo, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import type { UserRole } from "@/lib/types";
 import { type ApiLead, localDateKey, urgencyFor } from "@/lib/lead-ui";
 import { stageColor } from "@/lib/pipeline-stages";
 import { usePipelineStages } from "@/lib/use-pipeline-stages";
+import { clearDraft, readDraft, useFormDraft } from "@/lib/use-form-draft";
 import { LogCallModal, type LogCallForm } from "@/components/LogCallModal";
+
+const rescheduleDraftKey = (leadId: string) => `lead:${leadId}:reschedule`;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -425,9 +428,15 @@ function RescheduleModal({
   onClose: () => void;
   onSave: (date: string, time: string) => void;
 }) {
-  const [date, setDate] = useState(lead.date);
-  const [time, setTime] = useState(lead.time === "99:99" ? "" : lead.time);
+  const scheduledTime = lead.time === "99:99" ? "" : lead.time;
+  const [initial] = useState(() => ({ date: lead.date, time: scheduledTime, ...readDraft<{ date: string; time: string }>(rescheduleDraftKey(lead.id)) }));
+  const [date, setDate] = useState(initial.date);
+  const [time, setTime] = useState(initial.time);
   const [error, setError] = useState("");
+  const schedule = useMemo(() => ({ date, time }), [date, time]);
+  const clearScheduleDraft = useFormDraft(rescheduleDraftKey(lead.id), schedule, {
+    isEmpty: (value) => value.date === lead.date && value.time === scheduledTime,
+  });
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center" style={{ background: "rgba(15,27,60,0.45)" }} onClick={onClose}>
@@ -452,7 +461,7 @@ function RescheduleModal({
         </div>
         {error && <p className="px-6" style={{ fontSize: 12, color: "#DC2626", marginTop: -8 }}>{error}</p>}
         <div className="flex justify-end gap-3 px-6 py-4" style={{ borderTop: "1px solid #E3E7EF" }}>
-          <button type="button" onClick={onClose} className="rounded-lg font-semibold" style={{ height: 36, paddingInline: 16, fontSize: 13, background: "#F3F4F6", color: "#374151" }}>Cancel</button>
+          <button type="button" onClick={() => { clearScheduleDraft(); onClose(); }} className="rounded-lg font-semibold" style={{ height: 36, paddingInline: 16, fontSize: 13, background: "#F3F4F6", color: "#374151" }}>Cancel</button>
           <button
             type="button"
             className="rounded-lg font-semibold"
@@ -576,6 +585,7 @@ export function FollowUps({ role }: { role: UserRole }) {
     if (!rescheduleLead) return;
     try {
       await patchFollowUp(rescheduleLead.id, date, time);
+      clearDraft(rescheduleDraftKey(rescheduleLead.id));
       applySchedule(rescheduleLead.id, date, time);
       setRescheduleLead(null);
       setError("");
@@ -691,9 +701,10 @@ export function FollowUps({ role }: { role: UserRole }) {
 
       {callLead && (
         <LogCallModal
+          leadId={callLead.id}
           companyName={callLead.company}
           onClose={() => setCallLead(null)}
-          onSave={(data) => { void handleLogCall(data); }}
+          onSave={handleLogCall}
         />
       )}
       {rescheduleLead && (

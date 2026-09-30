@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { setDraftOwner } from "@/lib/use-form-draft";
 import type { UserRole } from "./types";
 
 const RoleContext = createContext<UserRole>("admin");
@@ -44,6 +45,7 @@ export function RoleProvider({
 
       const profileName = typeof profile?.name === "string" ? profile.name.trim() : "";
       if (mounted) {
+        setDraftOwner(user.id);
         setRole(resolvedRole);
         setName(profileName);
       }

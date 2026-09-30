@@ -148,6 +148,7 @@ export async function PATCH(
     source?: string;
     assigneeName?: string;
     proposalSent?: boolean;
+    notes?: string | null;
     customFields?: Array<{ id?: string; value?: string | boolean }>;
   } | null;
   if (!body) return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
@@ -163,6 +164,7 @@ export async function PATCH(
     assigneeId?: string;
     proposalSent?: boolean;
     proposalSentDate?: Date | null;
+    notes?: string | null;
   } = {};
 
   if (body.company !== undefined) {
@@ -188,6 +190,10 @@ export async function PATCH(
   if (typeof body.proposalSent === "boolean") {
     data.proposalSent = body.proposalSent;
     data.proposalSentDate = body.proposalSent ? new Date() : null;
+  }
+  if (body.notes !== undefined) {
+    if (body.notes !== null && typeof body.notes !== "string") return NextResponse.json({ error: "Notes must be text" }, { status: 400 });
+    data.notes = body.notes?.trim() ? body.notes : null;
   }
 
   if ("followUpDate" in body) {

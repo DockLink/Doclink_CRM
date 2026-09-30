@@ -1,8 +1,17 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useDisplayName } from "@/lib/role-context";
+import { readDraft, useFormDraft } from "@/lib/use-form-draft";
+
+const ACCOUNT_DRAFT_KEY = "profile:account";
+
+interface AccountDraft {
+  name: string;
+  email: string;
+  role: "superadmin" | "admin";
+}
 
 interface ProfileData {
   name: string;
@@ -107,16 +116,26 @@ export function Profile() {
   const [savingPw, setSavingPw] = useState(false);
   const [pwMsg, setPwMsg] = useState<{ kind: "error" | "success"; text: string } | null>(null);
 
+  const accountDraft = useMemo<AccountDraft>(() => ({ name, email, role }), [name, email, role]);
+  useFormDraft(profile ? ACCOUNT_DRAFT_KEY : null, accountDraft, {
+    isEmpty: (value) => !profile || (
+      value.name.trim() === profile.name
+      && (profile.role !== "superadmin" || (value.email.trim().toLowerCase() === profile.email.toLowerCase() && value.role === profile.role))
+    ),
+  });
+
   useEffect(() => {
     const load = async () => {
       try {
         const response = await fetch("/api/profile");
         const result = (await response.json()) as { profile?: ProfileData; error?: string };
         if (!response.ok || !result.profile) { setLoadError(result.error ?? "Unable to load profile."); return; }
+        const draft = readDraft<Partial<AccountDraft>>(ACCOUNT_DRAFT_KEY);
+        const canEditAccess = result.profile.role === "superadmin";
         setProfile(result.profile);
-        setName(result.profile.name);
-        setEmail(result.profile.email);
-        setRole(result.profile.role);
+        setName(draft?.name ?? result.profile.name);
+        setEmail((canEditAccess && draft?.email) || result.profile.email);
+        setRole((canEditAccess && draft?.role) || result.profile.role);
         setSessionName(result.profile.name);
       } catch {
         setLoadError("Unable to reach the server. Please refresh and try again.");

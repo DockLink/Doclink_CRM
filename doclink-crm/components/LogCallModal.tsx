@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { readDraft, useFormDraft } from "@/lib/use-form-draft";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -198,24 +199,33 @@ function DateTimeInput({
 // ─── Main modal ───────────────────────────────────────────────────────────────
 
 interface LogCallModalProps {
+  leadId?: string;
   companyName?: string;
   initialOutcome?: Outcome;
   onClose?: () => void;
   onSave?: (data: LogCallForm) => void | Promise<void>;
 }
 
+function isBlankCallLog(form: LogCallForm) {
+  return !form.outcome && !form.notes.trim() && !form.followUpDate && !form.followUpTime;
+}
+
 export function LogCallModal({
+  leadId,
   companyName = "Meridian Corp",
   initialOutcome = null,
   onClose,
   onSave,
 }: LogCallModalProps) {
-  const [form, setForm] = useState<LogCallForm>({
+  const draftKey = leadId ? `lead:${leadId}:log-call` : null;
+  const [form, setForm] = useState<LogCallForm>(() => ({
     outcome: initialOutcome,
     notes: "",
     followUpDate: "",
     followUpTime: "",
-  });
+    ...readDraft<Partial<LogCallForm>>(draftKey),
+  }));
+  const clearDraft = useFormDraft(draftKey, form, { isEmpty: isBlankCallLog });
   const [submitted, setSubmitted] = useState(false);
   const [saveError, setSaveError] = useState("");
 
@@ -237,6 +247,7 @@ export function LogCallModal({
     if (requiresFollowUp && (!form.followUpDate || !form.followUpTime)) return;
     try {
       await onSave?.(form);
+      clearDraft();
       onClose?.();
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "Unable to save this call.");
@@ -423,7 +434,7 @@ export function LogCallModal({
           {saveError && <span className="mr-auto" style={{ fontSize: 12, color: "#DC2626" }}>{saveError}</span>}
           <button
             type="button"
-            onClick={onClose}
+            onClick={() => { clearDraft(); onClose?.(); }}
             className="rounded-lg font-semibold"
             style={{ height: 38, paddingInline: 18, fontSize: 13, color: "#374151", background: "#F3F4F6" }}
             onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#E5E7EB"; }}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, type CSSProperties, type ReactNode } from "react";
+import { useState, useRef, useEffect, useMemo, type CSSProperties, type ReactNode } from "react";
 import type { UserRole } from "@/lib/types";
 import {
   REVENUE_CURRENCIES,
@@ -13,6 +13,7 @@ import {
 import { assigneeColor, initials, priorityForStage } from "@/lib/lead-ui";
 import { nextStageName, stageColor, type PipelineStage } from "@/lib/pipeline-stages";
 import { usePipelineStages } from "@/lib/use-pipeline-stages";
+import { clearDraft, readDraft, useFormDraft } from "@/lib/use-form-draft";
 import { LogCallModal, type LogCallForm } from "@/components/LogCallModal";
 import { LOST_REASON_OPTIONS, LostReasonModal, type LostReason } from "@/components/LostReasonModal";
 
@@ -88,6 +89,8 @@ async function patchLead(leadId: string, body: Record<string, unknown>) {
   if (!response.ok) throw new Error(result.error ?? "Unable to save changes.");
   return result;
 }
+
+const leadDraftKey = (leadId: string, section: string) => `lead:${leadId}:${section}`;
 
 const DEFAULT_SOURCES = ["Referral", "Website", "Cold Call", "LinkedIn", "Trade Show", "Email Campaign", "Partner", "Event"];
 
@@ -381,8 +384,11 @@ function HeaderKebab({
 // ─── Details Tab ──────────────────────────────────────────────────────────────
 
 function DetailsTab({ lead, role, stages, onLeadChange, onMarkDead }: { lead: LeadDetail; role: UserRole; stages: PipelineStage[]; onLeadChange: (update: LeadUpdate) => void; onMarkDead: () => void }) {
-  const [notes, setNotes] = useState(lead.notes);
-  const [autoSaved, setAutoSaved] = useState(false);
+  const notesDraftKey = leadDraftKey(lead.id, "notes");
+  const [notes, setNotes] = useState(() => readDraft<string>(notesDraftKey) ?? lead.notes);
+  useFormDraft(notesDraftKey, notes, { isEmpty: (value) => value === lead.notes });
+  const [notesStatus, setNotesStatus] = useState<"idle" | "saved" | "error">("idle");
+  const latestNotes = useRef(notes);
   const [showLogModal, setShowLogModal] = useState(false);
   const [customFieldError, setCustomFieldError] = useState("");
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -400,6 +406,7 @@ function DetailsTab({ lead, role, stages, onLeadChange, onMarkDead }: { lead: Le
     setCustomFieldValue(field.id, value);
     try {
       const result = await patchLead(lead.id, { customFields: [{ id: field.id, value }] });
+      clearDraft(leadDraftKey(lead.id, `field:${field.id}`));
       const saved = result.customFields?.find((entry) => entry.id === field.id)?.value;
       if (saved !== undefined) setCustomFieldValue(field.id, field.type === "toggle" ? saved === "true" : saved);
     } catch (err) {
@@ -425,14 +432,38 @@ function DetailsTab({ lead, role, stages, onLeadChange, onMarkDead }: { lead: Le
     }
   };
 
+  const saveNotes = async (value: string) => {
+    try {
+      await patchLead(lead.id, { notes: value });
+      onLeadChange((prev) => ({ ...prev, notes: value }));
+      if (latestNotes.current !== value) return;
+      clearDraft(notesDraftKey);
+      setNotesStatus("saved");
+      setTimeout(() => setNotesStatus((status) => (status === "saved" ? "idle" : status)), 2000);
+    } catch {
+      if (latestNotes.current === value) setNotesStatus("error");
+    }
+  };
+
   const handleNotesChange = (val: string) => {
     setNotes(val);
+    latestNotes.current = val;
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
-      setAutoSaved(true);
-      setTimeout(() => setAutoSaved(false), 2000);
-    }, 900);
+    saveTimer.current = setTimeout(() => void saveNotes(val), 900);
   };
+
+  useEffect(() => {
+    if (latestNotes.current !== lead.notes) void saveNotes(latestNotes.current);
+    // Only on mount: syncs notes restored from a draft that never reached the server.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (notesStatus !== "error") return;
+    const retry = () => void saveNotes(latestNotes.current);
+    window.addEventListener("online", retry);
+    return () => window.removeEventListener("online", retry);
+  });
 
   const handleLogCallSave = async (data: LogCallForm) => {
     if (!data.outcome) return;
@@ -579,8 +610,11 @@ function DetailsTab({ lead, role, stages, onLeadChange, onMarkDead }: { lead: Le
               onFocus={(e) => { e.currentTarget.style.borderColor = "#2FBEB3"; }}
               onBlur={(e) => { e.currentTarget.style.borderColor = "#E3E7EF"; }}
             />
-            {autoSaved && (
+            {notesStatus === "saved" && (
               <span style={{ position: "absolute", bottom: 8, right: 10, fontSize: 11, color: "#9CA3AF" }}>Auto-saved</span>
+            )}
+            {notesStatus === "error" && (
+              <span role="alert" style={{ position: "absolute", bottom: 8, right: 10, fontSize: 11, color: "#DC2626" }}>Not saved — kept as draft</span>
             )}
           </div>
         </Card>
@@ -590,7 +624,7 @@ function DetailsTab({ lead, role, stages, onLeadChange, onMarkDead }: { lead: Le
           <div className="flex flex-col gap-3">
             {lead.customFields.filter((cf) => cf.key).map((cf) => (
               <CustomFieldRow key={cf.id} label={cf.label}>
-                <CustomFieldEditor field={cf} onSave={(value) => void saveCustomField(cf, value)} />
+                <CustomFieldEditor field={cf} draftKey={leadDraftKey(lead.id, `field:${cf.id}`)} onSave={(value) => void saveCustomField(cf, value)} />
               </CustomFieldRow>
             ))}
             <CustomFieldRow
@@ -601,7 +635,7 @@ function DetailsTab({ lead, role, stages, onLeadChange, onMarkDead }: { lead: Le
             </CustomFieldRow>
             {lead.customFields.filter((cf) => !cf.key).map((cf) => (
               <CustomFieldRow key={cf.id} label={cf.label}>
-                <CustomFieldEditor field={cf} onSave={(value) => void saveCustomField(cf, value)} />
+                <CustomFieldEditor field={cf} draftKey={leadDraftKey(lead.id, `field:${cf.id}`)} onSave={(value) => void saveCustomField(cf, value)} />
               </CustomFieldRow>
             ))}
             {customFieldError && <p role="alert" style={{ fontSize: 12, color: "#DC2626" }}>{customFieldError}</p>}
@@ -662,6 +696,7 @@ function DetailsTab({ lead, role, stages, onLeadChange, onMarkDead }: { lead: Le
 
       {showLogModal && (
         <LogCallModal
+          leadId={lead.id}
           companyName={lead.company}
           onClose={() => setShowLogModal(false)}
           onSave={handleLogCallSave}
@@ -845,8 +880,9 @@ function CustomFieldRow({ label, hint, children }: { label: string; hint?: strin
 }
 
 // Parents remount this with `key={value}` so the draft resets after a save.
-function DraftInput({ value, type, placeholder, onSave }: { value: string; type: string; placeholder?: string; onSave: (value: string) => void }) {
-  const [draft, setDraft] = useState(value);
+function DraftInput({ value, type, placeholder, draftKey, onSave }: { value: string; type: string; placeholder?: string; draftKey: string; onSave: (value: string) => void }) {
+  const [draft, setDraft] = useState(() => readDraft<string>(draftKey) ?? value);
+  useFormDraft(draftKey, draft, { isEmpty: (next) => next.trim() === value });
   return (
     <input
       type={type}
@@ -865,11 +901,13 @@ function DraftInput({ value, type, placeholder, onSave }: { value: string; type:
   );
 }
 
-function MonthlyRevenueInput({ value, onSave }: { value: string; onSave: (value: string) => void }) {
-  const initial = parseMonthlyRevenue(value);
+function MonthlyRevenueInput({ value, draftKey, onSave }: { value: string; draftKey: string; onSave: (value: string) => void }) {
+  const [initial] = useState(() => ({ ...parseMonthlyRevenue(value), ...readDraft<{ currency: RevenueCurrency; amount: string }>(draftKey) }));
   const [currency, setCurrency] = useState<RevenueCurrency>(initial.currency);
   const [amount, setAmount] = useState(initial.amount);
   const [focused, setFocused] = useState(false);
+  const revenueDraft = useMemo(() => ({ currency, amount }), [currency, amount]);
+  useFormDraft(draftKey, revenueDraft, { isEmpty: (next) => formatMonthlyRevenue(next) === value });
 
   const commit = (nextCurrency: RevenueCurrency, nextAmount: string) => {
     const next = formatMonthlyRevenue({ currency: nextCurrency, amount: nextAmount });
@@ -905,11 +943,11 @@ function MonthlyRevenueInput({ value, onSave }: { value: string; onSave: (value:
   );
 }
 
-function CustomFieldEditor({ field, onSave }: { field: CustomField; onSave: (value: string | boolean) => void }) {
+function CustomFieldEditor({ field, draftKey, onSave }: { field: CustomField; draftKey: string; onSave: (value: string | boolean) => void }) {
   const stored = typeof field.value === "boolean" ? String(field.value) : field.value ?? "";
 
   if (field.key === "monthlyRevenue") {
-    return <MonthlyRevenueInput key={stored} value={stored} onSave={onSave} />;
+    return <MonthlyRevenueInput key={stored} value={stored} draftKey={draftKey} onSave={onSave} />;
   }
   if (field.key === "discoveryCall") {
     return (
@@ -938,7 +976,7 @@ function CustomFieldEditor({ field, onSave }: { field: CustomField; onSave: (val
   const inputType = field.type === "number" ? "number" : field.type === "date" ? "date" : field.type === "link" ? "url" : "text";
   return (
     <div className="flex items-center gap-1.5 w-full">
-      <DraftInput key={stored} value={stored} type={inputType} placeholder={field.type === "link" ? "https://" : undefined} onSave={onSave} />
+      <DraftInput key={stored} value={stored} type={inputType} draftKey={draftKey} placeholder={field.type === "link" ? "https://" : undefined} onSave={onSave} />
       {field.type === "link" && stored && (
         <a href={stored} target="_blank" rel="noreferrer" title="Open link" className="flex items-center justify-center rounded shrink-0" style={{ width: 28, height: 28, color: "#2FBEB3" }}>
           <LinkIcon />
@@ -957,9 +995,20 @@ interface InfoDraft {
   assignee: string;
 }
 
+function infoDraftFromLead(lead: LeadDetail): InfoDraft {
+  return { company: lead.company, niche: lead.niche, contact: lead.contact, phone: lead.phone, source: lead.source, assignee: lead.assignee };
+}
+
 function InfoCard({ lead, role, onLeadChange }: { lead: LeadDetail; role: UserRole; onLeadChange: (update: LeadUpdate) => void }) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState<InfoDraft | null>(null);
+  const infoDraftKey = leadDraftKey(lead.id, "info");
+  const [draft, setDraft] = useState<InfoDraft | null>(() => {
+    const saved = readDraft<Partial<InfoDraft>>(infoDraftKey);
+    return saved ? { ...infoDraftFromLead(lead), ...saved } : null;
+  });
+  const [editing, setEditing] = useState(draft !== null);
+  const clearInfoDraft = useFormDraft(editing ? infoDraftKey : null, draft, {
+    isEmpty: (value) => !value || (Object.keys(value) as (keyof InfoDraft)[]).every((key) => value[key] === lead[key]),
+  });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
@@ -992,7 +1041,7 @@ function InfoCard({ lead, role, onLeadChange }: { lead: LeadDetail; role: UserRo
   };
 
   const startEditing = () => {
-    setDraft({ company: lead.company, niche: lead.niche, contact: lead.contact, phone: lead.phone, source: lead.source, assignee: lead.assignee });
+    setDraft({ ...infoDraftFromLead(lead), ...readDraft<Partial<InfoDraft>>(infoDraftKey) });
     setError("");
     setEditing(true);
   };
@@ -1014,12 +1063,13 @@ function InfoCard({ lead, role, onLeadChange }: { lead: LeadDetail; role: UserRo
     }
     const assigneeName = role === "superadmin" && draft.assignee && draft.assignee !== lead.assignee ? draft.assignee : "";
     if (assigneeName) body.assigneeName = assigneeName;
-    if (Object.keys(body).length === 0) { setEditing(false); return; }
+    if (Object.keys(body).length === 0) { clearInfoDraft(); setEditing(false); return; }
 
     setSaving(true);
     setError("");
     try {
       await patchLead(lead.id, body);
+      clearInfoDraft();
       onLeadChange((prev) => ({
         ...prev,
         ...next,
@@ -1084,7 +1134,7 @@ function InfoCard({ lead, role, onLeadChange }: { lead: LeadDetail; role: UserRo
           <div className="flex justify-end gap-2 pt-1">
             <button
               type="button"
-              onClick={() => { setEditing(false); setError(""); }}
+              onClick={() => { clearInfoDraft(); setEditing(false); setError(""); }}
               className="rounded-lg font-semibold"
               style={{ height: 32, paddingInline: 14, fontSize: 12, color: "#374151", background: "#F3F4F6" }}
             >

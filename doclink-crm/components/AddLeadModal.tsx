@@ -6,6 +6,7 @@ import { activeStages, stageColor } from "@/lib/pipeline-stages";
 import { usePipelineStages } from "@/lib/use-pipeline-stages";
 import { priorityForStage } from "@/lib/lead-ui";
 import { REVENUE_CURRENCIES, YES_NO_OPTIONS, type RevenueCurrency, type YesNo } from "@/lib/lead-custom-fields";
+import { readDraft, useFormDraft } from "@/lib/use-form-draft";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -67,6 +68,13 @@ const EMPTY_FORM: LeadForm = {
   discoveryCall: "",
   proposalSent: false,
 };
+
+const NEW_LEAD_DRAFT_KEY = "lead:new";
+
+function isBlankLeadForm(form: LeadForm) {
+  return !form.company.trim() && !form.niche && !form.contact.trim() && !form.phone.trim() && !form.source
+    && !form.revenueAmount && !form.discoveryCall && !form.proposalSent;
+}
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 
@@ -330,7 +338,9 @@ interface AddLeadModalProps {
 }
 
 export function AddLeadModal({ mode = "add", role, showValidation = false, onClose }: AddLeadModalProps) {
-  const [form, setForm] = useState<LeadForm>({ ...EMPTY_FORM });
+  const draftKey = mode === "add" ? NEW_LEAD_DRAFT_KEY : null;
+  const [form, setForm] = useState<LeadForm>(() => ({ ...EMPTY_FORM, ...readDraft<Partial<LeadForm>>(draftKey) }));
+  const clearDraft = useFormDraft(draftKey, form, { isEmpty: isBlankLeadForm });
   const [assignees, setAssignees] = useState<AssignableUser[]>([]);
   const { stages } = usePipelineStages();
   const stageOptions = activeStages(stages);
@@ -412,6 +422,7 @@ export function AddLeadModal({ mode = "add", role, showValidation = false, onClo
         setSaveError(result.error ?? "Unable to save lead.");
         return;
       }
+      clearDraft();
       onClose?.();
     } catch {
       setSaveError("Unable to reach the server. Please try again.");
@@ -698,7 +709,7 @@ export function AddLeadModal({ mode = "add", role, showValidation = false, onClo
           {saveError && <p role="alert" style={{ marginRight: "auto", maxWidth: 280, fontSize: 12, color: "#DC2626" }}>{saveError}</p>}
           <button
             type="button"
-            onClick={onClose}
+            onClick={() => { clearDraft(); onClose?.(); }}
             className="rounded-lg font-semibold"
             style={{ height: 38, paddingInline: 18, fontSize: 13, color: "#374151", background: "#F3F4F6", border: "none" }}
             onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#E5E7EB"; }}

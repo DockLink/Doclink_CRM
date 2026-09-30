@@ -134,13 +134,7 @@ function ChevronDownTinyIcon({ open }: { open?: boolean }) {
   );
 }
 
-function FilterIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: "#6B7280" }}>
-      <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
-    </svg>
-  );
-}
+
 
 function UploadIcon() {
   return (
@@ -500,14 +494,6 @@ function KanbanTopBar({ role }: { role: UserRole }) {
 
       <div className="flex-1" />
 
-      <button
-        type="button"
-        className="flex items-center gap-1.5 px-3 h-9 rounded-lg text-sm font-medium transition-colors hover:bg-[#F9FAFB]"
-        style={{ border: "1px solid #E5E7EB", background: "#FFFFFF", cursor: "pointer", color: "#374151" }}
-      >
-        <FilterIcon />
-        Filter
-      </button>
 
       {role === "superadmin" && (
         <Link

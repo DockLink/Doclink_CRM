@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { PAGE_ROUTES, pageTitleForPath, pathnameToPage, type UserRole } from "@/lib/types";
 import { useDisplayName, useRole } from "@/lib/role-context";
+import { clearAllDrafts } from "@/lib/use-form-draft";
 
 export type { UserRole };
 
@@ -403,6 +404,7 @@ export function Shell({ children }: { children: ReactNode }) {
   const { name } = useDisplayName();
   const pageTitle = pageTitleForPath(pathname);
   const handleSignOut = async () => {
+    clearAllDrafts();
     await createClient().auth.signOut();
     router.push("/login");
     router.refresh();
