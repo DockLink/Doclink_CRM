@@ -8,7 +8,6 @@ export type CallOutcome =
   | "answered"
   | "no_answer"
   | "callback_requested"
-  | "voicemail"
   | "proposal_discussed"
   | "meeting_set";
 
@@ -42,10 +41,6 @@ const OUTCOMES: { key: Exclude<Outcome, null>; meta: OutcomeMeta }[] = [
   {
     key: "callback_requested",
     meta: { label: "Callback Requested", bg: "#6366F1", text: "#FFFFFF", border: "#6366F1" },
-  },
-  {
-    key: "voicemail",
-    meta: { label: "Voicemail Left",    bg: "#9CA3AF", text: "#FFFFFF", border: "#9CA3AF" },
   },
   {
     key: "proposal_discussed",

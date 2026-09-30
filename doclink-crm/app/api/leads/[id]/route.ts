@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireProfile } from "@/lib/api-auth";
+import { formatMonthlyRevenue, parseMonthlyRevenue, parseYesNo } from "@/lib/lead-custom-fields";
+import { ensureStandardCustomFields, standardFieldKey } from "@/lib/standard-custom-fields";
 
 const fieldTypes = {
   TEXT: "text",
@@ -39,6 +41,7 @@ export async function GET(
   if (response) return response;
 
   const { id } = await params;
+  const standardIds = await ensureStandardCustomFields();
   const [lead, fields] = await Promise.all([
     prisma.lead.findUnique({
       where: { id },
@@ -62,6 +65,14 @@ export async function GET(
   if (!lead) return NextResponse.json({ error: "Lead not found" }, { status: 404 });
 
   const values = new Map(lead.customFieldValues.map((entry) => [entry.customFieldId, entry.value ?? ""]));
+  const standardOrder = Object.values(standardIds);
+  const orderedFields = [...fields].sort((a, b) => {
+    const rank = (fieldId: string) => {
+      const index = standardOrder.indexOf(fieldId);
+      return index === -1 ? standardOrder.length : index;
+    };
+    return rank(a.id) - rank(b.id);
+  });
 
   return NextResponse.json({
     lead: {
@@ -80,11 +91,12 @@ export async function GET(
       followUpTime: timeInput(lead.followUpTime),
       notes: lead.notes ?? "",
       lostReason: lead.lostReason,
-      customFields: fields.map((field) => {
+      customFields: orderedFields.map((field) => {
         const stored = values.get(field.id) ?? "";
         const type = fieldTypes[field.type];
         return {
           id: field.id,
+          key: standardFieldKey(standardIds, field.id),
           label: field.label,
           type,
           value: type === "toggle" ? stored.toLowerCase() === "true" : stored,
@@ -100,6 +112,10 @@ export async function GET(
       })),
     },
   });
+}
+
+function text(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
 }
 
 function dateOnly(value: string) {
@@ -118,12 +134,61 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const { response } = await requireProfile(request);
+  const { profile, response } = await requireProfile(request);
   if (response) return response;
 
   const { id } = await params;
-  const body = await request.json() as { followUpDate?: string | null; followUpTime?: string | null };
-  const data: { followUpDate?: Date | null; followUpTime?: Date | null } = {};
+  const body = await request.json().catch(() => null) as {
+    followUpDate?: string | null;
+    followUpTime?: string | null;
+    company?: string;
+    niche?: string;
+    contact?: string;
+    phone?: string;
+    source?: string;
+    assigneeName?: string;
+    proposalSent?: boolean;
+    customFields?: Array<{ id?: string; value?: string | boolean }>;
+  } | null;
+  if (!body) return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
+
+  const data: {
+    followUpDate?: Date | null;
+    followUpTime?: Date | null;
+    company?: string;
+    niche?: string | null;
+    contact?: string | null;
+    phone?: string | null;
+    sourceId?: string | null;
+    assigneeId?: string;
+    proposalSent?: boolean;
+    proposalSentDate?: Date | null;
+  } = {};
+
+  if (body.company !== undefined) {
+    const company = text(body.company);
+    if (!company) return NextResponse.json({ error: "Company name is required" }, { status: 400 });
+    data.company = company;
+  }
+  if (body.niche !== undefined) data.niche = text(body.niche) || null;
+  if (body.contact !== undefined) data.contact = text(body.contact) || null;
+  if (body.phone !== undefined) data.phone = text(body.phone) || null;
+  if (body.source !== undefined) {
+    const sourceName = text(body.source);
+    data.sourceId = sourceName
+      ? (await prisma.leadSource.upsert({ where: { name: sourceName }, update: {}, create: { name: sourceName } })).id
+      : null;
+  }
+  if (body.assigneeName !== undefined) {
+    if (profile.role !== "superadmin") return NextResponse.json({ error: "Only superadmins can reassign leads" }, { status: 403 });
+    const assignee = await prisma.user.findFirst({ where: { name: text(body.assigneeName), isActive: true } });
+    if (!assignee) return NextResponse.json({ error: "Selected assignee was not found" }, { status: 400 });
+    data.assigneeId = assignee.id;
+  }
+  if (typeof body.proposalSent === "boolean") {
+    data.proposalSent = body.proposalSent;
+    data.proposalSentDate = body.proposalSent ? new Date() : null;
+  }
 
   if ("followUpDate" in body) {
     if (!body.followUpDate) {
@@ -143,12 +208,56 @@ export async function PATCH(
       data.followUpTime = parsed;
     }
   }
-  if (Object.keys(data).length === 0) {
+
+  const customInputs = Array.isArray(body.customFields)
+    ? body.customFields.filter((entry): entry is { id: string; value?: string | boolean } => typeof entry?.id === "string")
+    : [];
+  if (Object.keys(data).length === 0 && customInputs.length === 0) {
     return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
   }
 
   const existing = await prisma.lead.findUnique({ where: { id }, select: { id: true } });
   if (!existing) return NextResponse.json({ error: "Lead not found" }, { status: 404 });
-  await prisma.lead.update({ where: { id }, data });
-  return NextResponse.json({ id });
+
+  const standardIds = await ensureStandardCustomFields();
+  const fields = customInputs.length > 0
+    ? await prisma.customField.findMany({ where: { id: { in: customInputs.map((entry) => entry.id) } } })
+    : [];
+  const fieldsById = new Map(fields.map((field) => [field.id, field]));
+  const customValues: Array<{ customFieldId: string; value: string }> = [];
+  for (const entry of customInputs) {
+    const field = fieldsById.get(entry.id);
+    if (!field) return NextResponse.json({ error: "Custom field not found" }, { status: 400 });
+    const key = standardFieldKey(standardIds, field.id);
+    const raw = typeof entry.value === "boolean" ? String(entry.value) : text(entry.value);
+    const value = key === "monthlyRevenue"
+      ? formatMonthlyRevenue(parseMonthlyRevenue(raw))
+      : key === "discoveryCall"
+        ? parseYesNo(raw)
+        : field.type === "TOGGLE"
+          ? String(raw === "true")
+          : raw;
+    customValues.push({ customFieldId: field.id, value });
+  }
+
+  const lead = await prisma.$transaction(async (tx) => {
+    for (const { customFieldId, value } of customValues) {
+      await tx.leadCustomFieldValue.upsert({
+        where: { leadId_customFieldId: { leadId: id, customFieldId } },
+        update: { value },
+        create: { leadId: id, customFieldId, value },
+      });
+    }
+    return tx.lead.update({
+      where: { id },
+      data,
+      select: { proposalSentDate: true },
+    });
+  });
+
+  return NextResponse.json({
+    id,
+    proposalSentDate: lead.proposalSentDate?.toISOString() ?? null,
+    customFields: customValues.map(({ customFieldId, value }) => ({ id: customFieldId, value })),
+  });
 }

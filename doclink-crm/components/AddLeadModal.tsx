@@ -5,6 +5,7 @@ import type { UserRole } from "@/lib/types";
 import { activeStages, stageColor } from "@/lib/pipeline-stages";
 import { usePipelineStages } from "@/lib/use-pipeline-stages";
 import { priorityForStage } from "@/lib/lead-ui";
+import { REVENUE_CURRENCIES, YES_NO_OPTIONS, type RevenueCurrency, type YesNo } from "@/lib/lead-custom-fields";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -19,10 +20,10 @@ interface LeadForm {
   priority: Priority;
   assignee: string;
   stage: string;
-  customCompanySize: string;
-  customAnnualRevenue: string;
-  customNdaSigned: boolean;
-  customCaseStudySent: boolean;
+  revenueCurrency: RevenueCurrency;
+  revenueAmount: string;
+  discoveryCall: YesNo | "";
+  proposalSent: boolean;
 }
 
 interface FormErrors {
@@ -61,10 +62,10 @@ const EMPTY_FORM: LeadForm = {
   priority: null,
   assignee: "",
   stage: "",
-  customCompanySize: "",
-  customAnnualRevenue: "",
-  customNdaSigned: false,
-  customCaseStudySent: false,
+  revenueCurrency: "Rs",
+  revenueAmount: "",
+  discoveryCall: "",
+  proposalSent: false,
 };
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
@@ -401,6 +402,9 @@ export function AddLeadModal({ mode = "add", role, showValidation = false, onClo
           priority: form.priority,
           assigneeName: role === "superadmin" ? form.assignee : undefined,
           stage: form.stage,
+          monthlyRevenue: { currency: form.revenueCurrency, amount: form.revenueAmount },
+          discoveryCall: form.discoveryCall,
+          proposalSent: form.proposalSent,
         }),
       });
       const result = await response.json() as { error?: string };
@@ -604,48 +608,85 @@ export function AddLeadModal({ mode = "add", role, showValidation = false, onClo
             <div style={{ flex: 1, height: 1, background: "#E3E7EF" }} />
           </div>
 
-          {/* Custom: Company Size */}
+          {/* Custom: Monthly Revenue */}
           <div>
-            <Label>Company Size</Label>
-            <SelectInput
-              value={form.customCompanySize}
-              onChange={(v) => set("customCompanySize", v)}
-              options={["1–10", "11–50", "51–200", "201–500", "500+"]}
-              placeholder="Select range…"
-            />
-          </div>
-
-          {/* Custom: Annual Revenue */}
-          <div>
-            <Label>Annual Revenue (USD)</Label>
-            <TextInput
-              value={form.customAnnualRevenue}
-              onChange={(v) => set("customAnnualRevenue", v)}
-              placeholder="e.g. 4200000"
-            />
-          </div>
-
-          {/* Custom: Toggles */}
-          <div className="flex flex-col gap-3">
-            {[
-              { label: "NDA Signed", key: "customNdaSigned" as const },
-              { label: "Case Study Sent", key: "customCaseStudySent" as const },
-            ].map(({ label, key }) => (
-              <div key={key} className="flex items-center justify-between">
-                <span style={{ fontSize: 13, color: "#374151" }}>{label}</span>
-                <button
-                  type="button"
-                  onClick={() => set(key, !form[key])}
-                  className="rounded-full flex items-center"
-                  style={{ width: 40, height: 22, background: form[key] ? "#2FBEB3" : "#D1D5DB", padding: "0 2px", transition: "background 150ms" }}
-                >
-                  <span
-                    className="rounded-full"
-                    style={{ width: 18, height: 18, background: "#FFFFFF", transform: form[key] ? "translateX(18px)" : "translateX(0)", transition: "transform 150ms", boxShadow: "0 1px 3px rgba(0,0,0,0.2)" }}
-                  />
-                </button>
+            <Label>Monthly Revenue</Label>
+            <div className="flex gap-2">
+              <div className="flex rounded-lg overflow-hidden shrink-0" style={{ border: "1.5px solid #E3E7EF", height: 38 }}>
+                {REVENUE_CURRENCIES.map((currency, i) => {
+                  const active = form.revenueCurrency === currency;
+                  return (
+                    <button
+                      key={currency}
+                      type="button"
+                      onClick={() => set("revenueCurrency", currency)}
+                      className="font-semibold"
+                      style={{
+                        width: 44,
+                        fontSize: 13,
+                        background: active ? "#E3F7F5" : "#FFFFFF",
+                        color: active ? "#0E7A70" : "#9CA3AF",
+                        borderRight: i < REVENUE_CURRENCIES.length - 1 ? "1px solid #E3E7EF" : undefined,
+                      }}
+                    >
+                      {currency}
+                    </button>
+                  );
+                })}
               </div>
-            ))}
+              <div className="flex-1">
+                <TextInput
+                  value={form.revenueAmount}
+                  onChange={(v) => set("revenueAmount", v.replace(/[^0-9.]/g, ""))}
+                  placeholder={form.revenueCurrency === "Rs" ? "e.g. 50000" : "e.g. 1200"}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Custom: Discovery Call */}
+          <div>
+            <Label>Discovery Call</Label>
+            <div className="flex rounded-lg overflow-hidden" style={{ border: "1.5px solid #E3E7EF" }}>
+              {YES_NO_OPTIONS.map((option, i) => {
+                const active = form.discoveryCall === option;
+                const color = option === "Yes" ? "#16A34A" : "#DC2626";
+                return (
+                  <button
+                    key={option}
+                    type="button"
+                    onClick={() => set("discoveryCall", active ? "" : option)}
+                    className="flex-1 font-semibold"
+                    style={{
+                      height: 38,
+                      fontSize: 13,
+                      background: active ? `${color}14` : "#FFFFFF",
+                      color: active ? color : "#9CA3AF",
+                      borderRight: i < YES_NO_OPTIONS.length - 1 ? "1px solid #E3E7EF" : undefined,
+                      transition: "all 120ms",
+                    }}
+                  >
+                    {option}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Custom: Proposal Sent */}
+          <div className="flex items-center justify-between">
+            <span style={{ fontSize: 13, color: "#374151" }}>Proposal Sent</span>
+            <button
+              type="button"
+              onClick={() => set("proposalSent", !form.proposalSent)}
+              className="rounded-full flex items-center"
+              style={{ width: 40, height: 22, background: form.proposalSent ? "#2FBEB3" : "#D1D5DB", padding: "0 2px", transition: "background 150ms" }}
+            >
+              <span
+                className="rounded-full"
+                style={{ width: 18, height: 18, background: "#FFFFFF", transform: form.proposalSent ? "translateX(18px)" : "translateX(0)", transition: "transform 150ms", boxShadow: "0 1px 3px rgba(0,0,0,0.2)" }}
+              />
+            </button>
           </div>
         </div>
 

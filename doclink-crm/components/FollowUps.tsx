@@ -114,7 +114,6 @@ const OUTCOME_LABEL: Record<string, string> = {
   answered: "Answered",
   no_answer: "No Answer",
   callback_requested: "Callback Requested",
-  voicemail: "Voicemail Left",
   proposal_discussed: "Proposal Discussed",
   meeting_set: "Meeting Set",
 };

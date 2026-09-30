@@ -361,14 +361,6 @@ function ListTopBar({ role }: { role: UserRole }) {
         })}
       </div>
       <div className="flex-1" />
-      <button
-        type="button"
-        className="flex items-center gap-1.5 px-3 h-9 rounded-lg text-sm font-medium hover:bg-[#F9FAFB] transition-colors"
-        style={{ border: "1px solid #E5E7EB", background: "#FFFFFF", cursor: "pointer", color: "#374151" }}
-      >
-        <FilterBarIcon />
-        Filter
-      </button>
       {role === "superadmin" && (
         <Link
           href="/pipeline/bulk-import"
@@ -463,7 +455,7 @@ function FilterBar({
 
 // ─── List view ────────────────────────────────────────────────────────────────
 
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 25;
 
 type SortKey = keyof ListLead | null;
 
@@ -641,18 +633,18 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
           <table style={{ width: "100%", minWidth: 1100, borderCollapse: "collapse", tableLayout: "fixed" }}>
             <colgroup>
               <col style={{ width: 40 }} />
-              <col style={{ width: 32 }} />
+              <col style={{ width: 50 }} />
               <col style={{ width: 160 }} />
-              <col style={{ width: 120 }} />
-              <col style={{ width: 100 }} />
+              <col style={{ width: 160 }} />
+              <col style={{ width: 160 }} />
+              <col style={{ width: 160 }} />
+              <col style={{ width: 160 }} />
+              <col style={{ width: 160 }} />
+              <col style={{ width: 160 }} />
               <col style={{ width: 130 }} />
-              <col style={{ width: 128 }} />
-              <col style={{ width: 140 }} />
-              <col style={{ width: 100 }} />
-              <col style={{ width: 90 }} />
-              <col style={{ width: 90 }} />
-              <col style={{ width: 72 }} />
-              <col style={{ width: 150 }} />
+              <col style={{ width: 130 }} />
+              <col style={{ width: 120 }} />
+              <col style={{ width: 160 }} />
             </colgroup>
             <thead>
               <tr>
@@ -668,17 +660,17 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
                   ) : null}
                 </TH>
                 <TH center>PRI</TH>
-                <TH sortable sortDir={sortKey === "company" ? sortDir : null} onClick={() => handleSort("company")}>Company</TH>
-                <TH>Niche</TH>
-                <TH>Source</TH>
-                <TH>Contact</TH>
-                <TH>Phone</TH>
-                <TH sortable sortDir={sortKey === "stage" ? sortDir : null} onClick={() => handleSort("stage")}>Stage</TH>
-                <TH sortable sortDir={sortKey === "followUpDate" ? sortDir : null} onClick={() => handleSort("followUpDate")}>Follow-up Date</TH>
-                <TH>Time</TH>
-                <TH sortable sortDir={sortKey === "daysInStage" ? sortDir : null} onClick={() => handleSort("daysInStage")} center>Days in Stage</TH>
-                <TH sortable sortDir={sortKey === "calls" ? sortDir : null} onClick={() => handleSort("calls")} center>Calls</TH>
-                <TH>Assignee</TH>
+                <TH center sortable sortDir={sortKey === "company" ? sortDir : null} onClick={() => handleSort("company")}>Company</TH>
+                <TH center>Niche</TH>
+                <TH center>Source</TH>
+                <TH center>Contact</TH>
+                <TH center>Phone</TH>
+                <TH center sortable sortDir={sortKey === "stage" ? sortDir : null} onClick={() => handleSort("stage")}>Stage</TH>
+                <TH center sortable sortDir={sortKey === "followUpDate" ? sortDir : null} onClick={() => handleSort("followUpDate")}>Follow-up Date</TH>
+                <TH center>Time</TH>
+                <TH center sortable sortDir={sortKey === "daysInStage" ? sortDir : null} onClick={() => handleSort("daysInStage")} >Days in Stage</TH>
+                <TH center sortable sortDir={sortKey === "calls" ? sortDir : null} onClick={() => handleSort("calls")} >Calls</TH>
+                <TH center>Assignee</TH>
               </tr>
             </thead>
             <tbody>
@@ -735,7 +727,7 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
                     </td>
 
                     {/* Company */}
-                    <td style={{ padding: "0 12px" }}>
+                    <td style={{ padding: "0 12px",textAlign: "center" }}>
                       <div className="flex items-center gap-1.5 min-w-0">
                         {lead.stale && (
                           <div className="w-2 h-2 rounded-full shrink-0" style={{ background: "#94A3B8" }} title="No activity" />
@@ -745,27 +737,27 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
                     </td>
 
                     {/* Niche */}
-                    <td style={{ padding: "0 12px" }}>
+                    <td style={{ padding: "0 12px", textAlign: "center" }}>
                       <span className="truncate block" style={{ fontSize: 12, color: "#6B7280" }}>{lead.niche}</span>
                     </td>
 
                     {/* Source */}
-                    <td style={{ padding: "0 12px" }}>
+                    <td style={{ padding: "0 12px",textAlign: "center" }}>
                       <span className="truncate block" style={{ fontSize: 12, color: "#6B7280" }}>{lead.source}</span>
                     </td>
 
                     {/* Contact */}
-                    <td style={{ padding: "0 12px" }}>
+                    <td style={{ padding: "0 12px",textAlign: "center" }}>
                       <span className="truncate block" style={{ fontSize: 12, color: "#374151" }}>{lead.contact}</span>
                     </td>
 
                     {/* Phone */}
-                    <td style={{ padding: "0 12px" }}>
+                    <td style={{ padding: "0 12px",textAlign: "center" }}>
                       <span className="truncate block" style={{ fontSize: 11, color: "#9CA3AF", fontFamily: "monospace" }}>{lead.phone}</span>
                     </td>
 
                     {/* Stage pill */}
-                    <td style={{ padding: "0 12px" }}>
+                    <td style={{ padding: "0 12px", textAlign: "center" }}>
                       <span
                         className="inline-block px-2 py-0.5 rounded-full text-white truncate"
                         style={{ fontSize: 10, fontWeight: 500, background: stageColor(stages, lead.stage), maxWidth: 130, lineHeight: 1.6 }}
@@ -775,7 +767,7 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
                     </td>
 
                     {/* Follow-up date */}
-                    <td style={{ padding: "0 12px" }}>
+                    <td style={{ padding: "0 12px",textAlign: "center" }}>
                       <span
                         style={{
                           fontSize: 12,
@@ -788,7 +780,7 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
                     </td>
 
                     {/* Follow-up time */}
-                    <td style={{ padding: "0 12px" }}>
+                    <td style={{ padding: "0 12px",textAlign: "center" }}>
                       <span
                         className="px-1.5 py-0.5 rounded text-xs font-medium"
                         style={{
@@ -819,7 +811,7 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
                     </td>
 
                     {/* Assignee */}
-                    <td style={{ padding: "0 12px" }}>
+                    <td style={{ padding: "0 12px",textAlign: "center"}}>
                       <div className="flex items-center gap-2 min-w-0">
                         <div
                           className="w-6 h-6 rounded-full flex items-center justify-center text-white shrink-0"
@@ -853,23 +845,56 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
             <span style={{ fontSize: 12, color: "#9CA3AF" }}>
               Showing {Math.min((page - 1) * PAGE_SIZE + 1, sorted.length)}–{Math.min(page * PAGE_SIZE, sorted.length)} of {sorted.length} leads
             </span>
-            <div className="flex items-center gap-1">
-              {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
-                <button
-                  key={p}
-                  onClick={() => setPage(p)}
-                  className="w-7 h-7 rounded-lg text-xs font-medium transition-all"
-                  style={{
-                    background: p === page ? "#2FBEB3" : "transparent",
-                    color: p === page ? "#fff" : "#6B7280",
-                    border: p === page ? "none" : "1px solid transparent",
-                    cursor: "pointer",
-                  }}
-                >
-                  {p}
-                </button>
-              ))}
-            </div>
+            <div className="flex items-center gap-2">
+  {/* Previous */}
+  <button
+    type="button"
+    onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+    disabled={page === 1}
+    className="w-7 h-7 rounded-lg flex items-center justify-center text-sm transition-all"
+    style={{
+      background: "#FFFFFF",
+      color: page === 1 ? "#D1D5DB" : "#374151",
+      border: "1px solid #E5E7EB",
+      cursor: page === 1 ? "not-allowed" : "pointer",
+    }}
+    aria-label="Previous page"
+  >
+    ‹
+  </button>
+
+  {/* Page indicator */}
+  <span
+    style={{
+      fontSize: 12,
+      fontWeight: 500,
+      color: "#6B7280",
+      minWidth: 55,
+      textAlign: "center",
+    }}
+  >
+    {page} of {totalPages}
+  </span>
+
+  {/* Next */}
+  <button
+    type="button"
+    onClick={() =>
+      setPage((prev) => Math.min(totalPages, prev + 1))
+    }
+    disabled={page === totalPages}
+    className="w-7 h-7 rounded-lg flex items-center justify-center text-sm transition-all"
+    style={{
+      background: "#FFFFFF",
+      color: page === totalPages ? "#D1D5DB" : "#374151",
+      border: "1px solid #E5E7EB",
+      cursor: page === totalPages ? "not-allowed" : "pointer",
+    }}
+    aria-label="Next page"
+  >
+    ›
+  </button>
+</div>
           </div>
         </div>
       </div>

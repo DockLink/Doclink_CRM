@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { createClient } from "@/lib/supabase/server";
 import { priorityForStage } from "@/lib/lead-ui";
+import { formatMonthlyRevenue, parseMonthlyRevenue, parseYesNo } from "@/lib/lead-custom-fields";
+import { ensureStandardCustomFields } from "@/lib/standard-custom-fields";
 
 type ImportRow = Record<string, unknown>;
 type Mapping = { sourceHeader: string; targetField: string };
@@ -69,6 +71,7 @@ export async function POST(request: Request) {
       mappings?: Mapping[];
       duplicateAction?: "skip" | "import";
       assigneeName?: string;
+      revenueCurrency?: string;
     } | null;
     if (!body || !Array.isArray(body.rows) || body.rows.length === 0 || !Array.isArray(body.mappings)) {
       return NextResponse.json({ error: "Rows and mappings are required" }, { status: 400 });
@@ -120,9 +123,14 @@ export async function POST(request: Request) {
       : [];
     const existingKeys = new Set(existingLeads.map((lead) => `${lead.company.trim().toLowerCase()}|${lead.phone ?? ""}`));
 
+    const standardIds = await ensureStandardCustomFields();
+    const revenueCurrency = body.revenueCurrency === "$" ? "$" : "Rs";
+
     const failedRows: Array<{ row: number; error: string }> = [];
     let skipped = 0;
+    const customFieldData: Array<{ leadId: string; customFieldId: string; value: string }> = [];
     const leadData: Array<{
+      id: string;
       company: string;
       contact?: string;
       phone?: string;
@@ -134,6 +142,8 @@ export async function POST(request: Request) {
       stageId: string;
       assigneeId: string;
       createdBy: string;
+      proposalSent: boolean;
+      proposalSentDate?: Date;
     }> = [];
 
     for (const [index, row] of rows.entries()) {
@@ -156,8 +166,15 @@ export async function POST(request: Request) {
       const rowStageName = cell(row, "Stage").toLowerCase();
       const rowStage = (rowStageName && stagesByName.get(rowStageName)) || defaultStage;
       const sourceName = cell(row, "Source");
+      const leadId = crypto.randomUUID();
+      const proposalSent = parseYesNo(cell(row, "Proposal Sent")) === "Yes";
+      const monthlyRevenue = formatMonthlyRevenue(parseMonthlyRevenue(cell(row, "Monthly Revenue"), revenueCurrency));
+      const discoveryCall = parseYesNo(cell(row, "Discovery Call"));
+      if (monthlyRevenue) customFieldData.push({ leadId, customFieldId: standardIds.monthlyRevenue, value: monthlyRevenue });
+      if (discoveryCall) customFieldData.push({ leadId, customFieldId: standardIds.discoveryCall, value: discoveryCall });
 
       leadData.push({
+        id: leadId,
         company,
         contact: cell(row, "Contact Name") || undefined,
         phone: phone || undefined,
@@ -169,11 +186,16 @@ export async function POST(request: Request) {
         stageId: rowStage.id,
         assigneeId: rowAssignee.id,
         createdBy: profile.id,
+        proposalSent,
+        proposalSentDate: proposalSent ? new Date() : undefined,
       });
     }
 
     if (leadData.length > 0) {
-      await prisma.lead.createMany({ data: leadData });
+      await prisma.$transaction([
+        prisma.lead.createMany({ data: leadData }),
+        ...(customFieldData.length > 0 ? [prisma.leadCustomFieldValue.createMany({ data: customFieldData })] : []),
+      ]);
     }
 
     return NextResponse.json({ imported: leadData.length, skipped, failedRows });

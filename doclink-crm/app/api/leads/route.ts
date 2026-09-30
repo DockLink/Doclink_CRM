@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { createClient } from "@/lib/supabase/server";
 import { priorityForStage, type LeadPriority } from "@/lib/lead-ui";
+import { formatMonthlyRevenue, parseYesNo } from "@/lib/lead-custom-fields";
+import { ensureStandardCustomFields } from "@/lib/standard-custom-fields";
 
 const priorityValues = new Set(["hot", "warm", "cold"]);
 
@@ -79,6 +81,9 @@ export async function POST(request: Request) {
   const body = await request.json() as {
     company?: string; niche?: string; contact?: string; phone?: string;
     source?: string; priority?: string | null; assigneeName?: string; stage?: string;
+    monthlyRevenue?: { currency?: string; amount?: string };
+    discoveryCall?: string;
+    proposalSent?: boolean;
   };
   const company = text(body.company);
   if (!company) return NextResponse.json({ error: "Company name is required" }, { status: 400 });
@@ -98,6 +103,19 @@ export async function POST(request: Request) {
     : null;
   const rawPriority = text(body.priority).toLowerCase();
   const priority = priorityValues.has(rawPriority) ? rawPriority as LeadPriority : priorityForStage(stage.name);
+
+  const standardIds = await ensureStandardCustomFields();
+  const monthlyRevenue = formatMonthlyRevenue({
+    currency: body.monthlyRevenue?.currency === "$" ? "$" : "Rs",
+    amount: text(body.monthlyRevenue?.amount),
+  });
+  const discoveryCall = parseYesNo(body.discoveryCall);
+  const customFieldValues = [
+    ...(monthlyRevenue ? [{ customFieldId: standardIds.monthlyRevenue, value: monthlyRevenue }] : []),
+    ...(discoveryCall ? [{ customFieldId: standardIds.discoveryCall, value: discoveryCall }] : []),
+  ];
+  const proposalSent = body.proposalSent === true;
+
   const lead = await prisma.lead.create({
     data: {
       company,
@@ -109,6 +127,9 @@ export async function POST(request: Request) {
       stageId: stage.id,
       assigneeId: assignee.id,
       createdBy: profile.id,
+      proposalSent,
+      proposalSentDate: proposalSent ? new Date() : undefined,
+      customFieldValues: customFieldValues.length > 0 ? { create: customFieldValues } : undefined,
     },
   });
   return NextResponse.json({ id: lead.id }, { status: 201 });

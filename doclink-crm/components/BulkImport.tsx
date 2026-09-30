@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, type ReactNode, type CSSProperties, type DragEvent } from "react";
 import * as XLSX from "xlsx";
 import type { UserRole } from "@/lib/types";
+import { REVENUE_CURRENCIES, type RevenueCurrency } from "@/lib/lead-custom-fields";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -30,16 +31,17 @@ const IGNORE_FIELD = "— Ignore field —";
 const DOCLINK_FIELDS = [
   "Company", "Contact Name", "Phone", "Niche", "Source",
   "Priority", "Assignee", "Stage", "Follow-up Date", "Notes",
-  "Annual Revenue", "Company Size", IGNORE_FIELD,
+  "Monthly Revenue", "Discovery Call", "Proposal Sent", IGNORE_FIELD,
 ];
 
 // Aliases are compared against headers lowercased with non-alphanumerics removed.
 // `exact` matches are marked auto-detected; `partial` (substring) matches ask for
 // confirmation and are tried in this array's order, so more specific fields come first.
 const FIELD_ALIASES: Array<{ field: string; exact: string[]; partial: string[] }> = [
+  { field: "Discovery Call", exact: ["discoverycall", "discovery", "discoverycalldone", "discoverycallcompleted", "democall", "demodone"], partial: ["discovery", "democall"] },
+  { field: "Proposal Sent", exact: ["proposalsent", "proposal", "proposalsubmitted", "proposalshared", "quotesent", "quotationsent"], partial: ["proposal", "quotation"] },
   { field: "Follow-up Date", exact: ["followupdate", "followup", "nextfollowup", "nextfollowupdate", "followupon", "callbackdate", "callback", "nextcall", "nextcalldate", "reminderdate", "reminder"], partial: ["followup", "callback", "reminder", "nextcall"] },
-  { field: "Company Size", exact: ["companysize", "size", "employees", "employeecount", "noofemployees", "numberofemployees", "headcount", "teamsize"], partial: ["employee", "headcount", "size"] },
-  { field: "Annual Revenue", exact: ["annualrevenue", "revenue", "turnover", "annualturnover"], partial: ["revenue", "turnover"] },
+  { field: "Monthly Revenue", exact: ["monthlyrevenue", "revenue", "mrr", "monthlyincome", "income", "turnover", "monthlyturnover", "monthlysales", "revenuepermonth"], partial: ["revenue", "mrr", "turnover", "income"] },
   { field: "Phone", exact: ["phone", "phonenumber", "phoneno", "mobile", "mobilenumber", "mobileno", "mob", "contactnumber", "contactno", "cell", "cellphone", "cellnumber", "telephone", "tel", "whatsapp", "whatsappnumber", "whatsappno", "number"], partial: ["phone", "mobile", "whatsapp", "contactno", "contactnumber", "number"] },
   { field: "Assignee", exact: ["assignee", "assignedto", "assigned", "owner", "leadowner", "salesrep", "rep", "agent", "executive", "salesperson", "salesexecutive", "handledby", "accountmanager"], partial: ["assign", "salesrep", "handledby"] },
   { field: "Source", exact: ["source", "leadsource", "channel", "origin", "medium", "referral", "referredby", "campaign"], partial: ["source", "channel", "referr"] },
@@ -433,9 +435,11 @@ function Step1({ onNext }: { onNext: (rows: ImportRow[], assigneeName: string) =
 
 // ─── Step 2: Map Columns ──────────────────────────────────────────────────────
 
-function Step2({ rows, initialMappings, onNext, onBack }: {
+function Step2({ rows, initialMappings, revenueCurrency, onRevenueCurrencyChange, onNext, onBack }: {
   rows: ImportRow[];
   initialMappings: ColumnMapping[];
+  revenueCurrency: RevenueCurrency;
+  onRevenueCurrencyChange: (currency: RevenueCurrency) => void;
   onNext: (mappings: ColumnMapping[]) => void;
   onBack: () => void;
 }) {
@@ -446,6 +450,7 @@ function Step2({ rows, initialMappings, onNext, onBack }: {
     return sameHeaders ? initialMappings : autoMapColumns(sourceHeaders);
   });
   const companyMapped = mappings.some((m) => m.targetField === "Company");
+  const revenueMapped = mappings.some((m) => m.targetField === "Monthly Revenue");
 
   const setField = (idx: number, field: string) => {
     setMappings((prev) => prev.map((m, i) => {
@@ -519,6 +524,20 @@ function Step2({ rows, initialMappings, onNext, onBack }: {
         ))}
       </div>
 
+      {revenueMapped && (
+        <div className="flex items-center gap-3 rounded-lg px-3 py-2.5" style={{ background: "#F9FAFB", border: "1px solid #E3E7EF" }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>Monthly revenue currency</span>
+          <div style={{ width: 90 }}>
+            <SelectField
+              value={revenueCurrency}
+              options={[...REVENUE_CURRENCIES]}
+              onChange={(value) => onRevenueCurrencyChange(value as RevenueCurrency)}
+            />
+          </div>
+          <span style={{ fontSize: 12, color: "#6B7280" }}>Used when a cell has no ₹/Rs or $ symbol.</span>
+        </div>
+      )}
+
       {!companyMapped && (
         <p role="alert" className="flex items-center gap-2" style={{ fontSize: 12, color: "#DC2626" }}>
           <WarningIcon size={14} />
@@ -537,10 +556,11 @@ function Step2({ rows, initialMappings, onNext, onBack }: {
 
 // ─── Step 3: Preview & Confirm ────────────────────────────────────────────────
 
-function Step3({ rows, mappings, assigneeName, onNext, onBack }: {
+function Step3({ rows, mappings, assigneeName, revenueCurrency, onNext, onBack }: {
   rows: ImportRow[];
   mappings: ColumnMapping[];
   assigneeName: string;
+  revenueCurrency: RevenueCurrency;
   onNext: (result: ImportResult) => void;
   onBack: () => void;
 }) {
@@ -588,6 +608,7 @@ function Step3({ rows, mappings, assigneeName, onNext, onBack }: {
           mappings: mappings.map(({ sourceHeader, targetField }) => ({ sourceHeader, targetField })),
           duplicateAction: dupAction,
           assigneeName,
+          revenueCurrency,
         }),
       });
       const result = await response.json().catch(() => ({})) as { imported?: number; skipped?: number; failedRows?: ImportResult["failedRows"]; error?: string };
@@ -775,6 +796,7 @@ export function BulkImport({ initialStep = 1, onNavigate }: BulkImportProps) {
   const [rows, setRows] = useState<ImportRow[]>([]);
   const [mappings, setMappings] = useState<ColumnMapping[]>([]);
   const [assigneeName, setAssigneeName] = useState("");
+  const [revenueCurrency, setRevenueCurrency] = useState<RevenueCurrency>("Rs");
   const [result, setResult] = useState<ImportResult>({ imported: 0, skipped: 0, failed: 0, failedRows: [] });
 
   return (
@@ -797,8 +819,8 @@ export function BulkImport({ initialStep = 1, onNavigate }: BulkImportProps) {
 
         {/* Step content */}
         {step === 1 && <Step1 onNext={(nextRows, nextAssignee) => { setRows(nextRows); setMappings([]); setAssigneeName(nextAssignee); setStep(2); }} />}
-        {step === 2 && <Step2 rows={rows} initialMappings={mappings} onNext={(nextMappings) => { setMappings(nextMappings); setStep(3); }} onBack={() => setStep(1)} />}
-        {step === 3 && <Step3 rows={rows} mappings={mappings} assigneeName={assigneeName} onNext={(nextResult) => { setResult(nextResult); setStep(4); }} onBack={() => setStep(2)} />}
+        {step === 2 && <Step2 rows={rows} initialMappings={mappings} revenueCurrency={revenueCurrency} onRevenueCurrencyChange={setRevenueCurrency} onNext={(nextMappings) => { setMappings(nextMappings); setStep(3); }} onBack={() => setStep(1)} />}
+        {step === 3 && <Step3 rows={rows} mappings={mappings} assigneeName={assigneeName} revenueCurrency={revenueCurrency} onNext={(nextResult) => { setResult(nextResult); setStep(4); }} onBack={() => setStep(2)} />}
         {step === 4 && (
           <Step4
             result={result}

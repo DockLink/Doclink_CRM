@@ -1,7 +1,15 @@
 "use client";
 
-import { useState, useRef, useEffect, type ReactNode } from "react";
+import { useState, useRef, useEffect, type CSSProperties, type ReactNode } from "react";
 import type { UserRole } from "@/lib/types";
+import {
+  REVENUE_CURRENCIES,
+  YES_NO_OPTIONS,
+  formatMonthlyRevenue,
+  parseMonthlyRevenue,
+  type RevenueCurrency,
+  type StandardFieldKey,
+} from "@/lib/lead-custom-fields";
 import { assigneeColor, initials, priorityForStage } from "@/lib/lead-ui";
 import { nextStageName, stageColor, type PipelineStage } from "@/lib/pipeline-stages";
 import { usePipelineStages } from "@/lib/use-pipeline-stages";
@@ -17,7 +25,6 @@ type CallOutcome =
   | "answered"
   | "no_answer"
   | "callback_requested"
-  | "voicemail"
   | "proposal_discussed"
   | "meeting_set";
 
@@ -32,6 +39,7 @@ interface ActivityEntry {
 
 interface CustomField {
   id: string;
+  key?: StandardFieldKey;
   label: string;
   type: "text" | "number" | "date" | "dropdown" | "toggle" | "link";
   value: string | boolean;
@@ -62,6 +70,27 @@ interface LeadDetail {
   lostReason?: LostReason;
 }
 
+type LeadUpdate = LeadDetail | ((prev: LeadDetail) => LeadDetail);
+
+interface LeadPatchResult {
+  proposalSentDate?: string | null;
+  customFields?: { id: string; value: string }[];
+  error?: string;
+}
+
+async function patchLead(leadId: string, body: Record<string, unknown>) {
+  const response = await fetch(`/api/leads/${leadId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const result = await response.json().catch(() => ({})) as LeadPatchResult;
+  if (!response.ok) throw new Error(result.error ?? "Unable to save changes.");
+  return result;
+}
+
+const DEFAULT_SOURCES = ["Referral", "Website", "Cold Call", "LinkedIn", "Trade Show", "Email Campaign", "Partner", "Event"];
+
 // ─── Palette helpers ──────────────────────────────────────────────────────────
 
 const PRIORITY_COLOR: Record<Priority, string> = {
@@ -80,7 +109,6 @@ const OUTCOME_META: Record<CallOutcome, { label: string; bg: string; color: stri
   answered:           { label: "Answered",           bg: "#DCFCE7", color: "#16A34A" },
   no_answer:          { label: "No Answer",           bg: "#FEF3C7", color: "#B45309" },
   callback_requested: { label: "Callback Requested",  bg: "#EDE9FE", color: "#6366F1" },
-  voicemail:          { label: "Voicemail Left",       bg: "#F1F5F9", color: "#64748B" },
   proposal_discussed: { label: "Proposal Discussed",  bg: "#EDE9FE", color: "#6366F1" },
   meeting_set:        { label: "Meeting Set",          bg: "#FEF9C3", color: "#B45309" },
 };
@@ -231,6 +259,14 @@ function CheckIcon({ size = 12 }: { size?: number }) {
   );
 }
 
+function PencilIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+    </svg>
+  );
+}
+
 // ─── Stage Selector dropdown ──────────────────────────────────────────────────
 
 function StageSelector({ stage, stages, onChange }: { stage: string; stages: PipelineStage[]; onChange: (s: string) => void }) {
@@ -344,12 +380,50 @@ function HeaderKebab({
 
 // ─── Details Tab ──────────────────────────────────────────────────────────────
 
-function DetailsTab({ lead, role, stages, onLeadChange, onMarkDead }: { lead: LeadDetail; role: UserRole; stages: PipelineStage[]; onLeadChange: (l: LeadDetail) => void; onMarkDead: () => void }) {
+function DetailsTab({ lead, role, stages, onLeadChange, onMarkDead }: { lead: LeadDetail; role: UserRole; stages: PipelineStage[]; onLeadChange: (update: LeadUpdate) => void; onMarkDead: () => void }) {
   const [notes, setNotes] = useState(lead.notes);
   const [autoSaved, setAutoSaved] = useState(false);
-  const [copied, setCopied] = useState(false);
   const [showLogModal, setShowLogModal] = useState(false);
+  const [customFieldError, setCustomFieldError] = useState("");
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const setCustomFieldValue = (fieldId: string, value: string | boolean) => {
+    onLeadChange((prev) => ({
+      ...prev,
+      customFields: prev.customFields.map((cf) => (cf.id === fieldId ? { ...cf, value } : cf)),
+    }));
+  };
+
+  const saveCustomField = async (field: CustomField, value: string | boolean) => {
+    const previous = field.value;
+    setCustomFieldError("");
+    setCustomFieldValue(field.id, value);
+    try {
+      const result = await patchLead(lead.id, { customFields: [{ id: field.id, value }] });
+      const saved = result.customFields?.find((entry) => entry.id === field.id)?.value;
+      if (saved !== undefined) setCustomFieldValue(field.id, field.type === "toggle" ? saved === "true" : saved);
+    } catch (err) {
+      setCustomFieldValue(field.id, previous);
+      setCustomFieldError(err instanceof Error ? err.message : "Unable to save changes.");
+    }
+  };
+
+  const toggleProposalSent = async () => {
+    const next = !lead.proposalSent;
+    const previousAt = lead.proposalSentAt;
+    setCustomFieldError("");
+    onLeadChange((prev) => ({ ...prev, proposalSent: next, proposalSentAt: next ? "Just now" : undefined }));
+    try {
+      const result = await patchLead(lead.id, { proposalSent: next });
+      onLeadChange((prev) => ({
+        ...prev,
+        proposalSentAt: result.proposalSentDate ? timestampLabel(result.proposalSentDate) : undefined,
+      }));
+    } catch (err) {
+      onLeadChange((prev) => ({ ...prev, proposalSent: !next, proposalSentAt: previousAt }));
+      setCustomFieldError(err instanceof Error ? err.message : "Unable to save changes.");
+    }
+  };
 
   const handleNotesChange = (val: string) => {
     setNotes(val);
@@ -358,12 +432,6 @@ function DetailsTab({ lead, role, stages, onLeadChange, onMarkDead }: { lead: Le
       setAutoSaved(true);
       setTimeout(() => setAutoSaved(false), 2000);
     }, 900);
-  };
-
-  const handleCopy = () => {
-    navigator.clipboard.writeText(lead.phone).catch(() => {});
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
   };
 
   const handleLogCallSave = async (data: LogCallForm) => {
@@ -430,26 +498,6 @@ function DetailsTab({ lead, role, stages, onLeadChange, onMarkDead }: { lead: Le
               <PhoneIcon size={13} />
               Log Call
             </button>
-
-            {/* Proposal Sent toggle */}
-            <div className="flex items-center justify-between">
-              <div>
-                <p style={{ fontSize: 13, fontWeight: 600, color: "#111111" }}>Proposal Sent</p>
-                {lead.proposalSent && lead.proposalSentAt && (
-                  <p style={{ fontSize: 11, color: "#6B7280", marginTop: 2 }}>Set {lead.proposalSentAt}</p>
-                )}
-              </div>
-              <button
-                onClick={() => onLeadChange({ ...lead, proposalSent: !lead.proposalSent, proposalSentAt: !lead.proposalSent ? "Just now" : undefined })}
-                className="rounded-full flex items-center"
-                style={{ width: 44, height: 24, background: lead.proposalSent ? "#2FBEB3" : "#D1D5DB", padding: "0 3px", transition: "background 150ms" }}
-              >
-                <span
-                  className="rounded-full"
-                  style={{ width: 18, height: 18, background: "#FFFFFF", transform: lead.proposalSent ? "translateX(20px)" : "translateX(0)", transition: "transform 150ms", boxShadow: "0 1px 3px rgba(0,0,0,0.2)" }}
-                />
-              </button>
-            </div>
 
             {/* Follow-up date + time */}
             <div className="flex gap-3">
@@ -540,12 +588,23 @@ function DetailsTab({ lead, role, stages, onLeadChange, onMarkDead }: { lead: Le
         {/* Custom Fields */}
         <Card title="Custom Fields">
           <div className="flex flex-col gap-3">
-            {lead.customFields.map((cf) => (
-              <div key={cf.id} className="flex items-center justify-between gap-3">
-                <span style={{ fontSize: 12, color: "#6B7280", flexShrink: 0, width: 130 }}>{cf.label}</span>
-                <CustomFieldValue field={cf} />
-              </div>
+            {lead.customFields.filter((cf) => cf.key).map((cf) => (
+              <CustomFieldRow key={cf.id} label={cf.label}>
+                <CustomFieldEditor field={cf} onSave={(value) => void saveCustomField(cf, value)} />
+              </CustomFieldRow>
             ))}
+            <CustomFieldRow
+              label="Proposal Sent"
+              hint={lead.proposalSent && lead.proposalSentAt ? `Set ${lead.proposalSentAt}` : undefined}
+            >
+              <Toggle on={lead.proposalSent} onClick={() => void toggleProposalSent()} label="Proposal Sent" />
+            </CustomFieldRow>
+            {lead.customFields.filter((cf) => !cf.key).map((cf) => (
+              <CustomFieldRow key={cf.id} label={cf.label}>
+                <CustomFieldEditor field={cf} onSave={(value) => void saveCustomField(cf, value)} />
+              </CustomFieldRow>
+            ))}
+            {customFieldError && <p role="alert" style={{ fontSize: 12, color: "#DC2626" }}>{customFieldError}</p>}
           </div>
         </Card>
       </div>
@@ -553,39 +612,7 @@ function DetailsTab({ lead, role, stages, onLeadChange, onMarkDead }: { lead: Le
       {/* Right 40% */}
       <div className="flex flex-col gap-4" style={{ flex: 1 }}>
 
-        {/* Info card */}
-        <Card title="Info">
-          <div className="flex flex-col gap-3">
-            <InfoRow label="Company" value={lead.company} />
-            <InfoRow label="Niche" value={lead.niche} />
-            <InfoRow label="Contact" value={lead.contact} />
-            <div className="flex items-center justify-between">
-              <span style={{ fontSize: 12, color: "#6B7280" }}>Phone</span>
-              <div className="flex items-center gap-1.5">
-                <span style={{ fontSize: 13, fontWeight: 500, color: "#111111" }}>{lead.phone}</span>
-                <button
-                  onClick={handleCopy}
-                  className="flex items-center justify-center rounded"
-                  style={{ width: 22, height: 22, color: copied ? "#2FBEB3" : "#9CA3AF", background: copied ? "#E3F7F5" : "transparent" }}
-                  title="Copy phone"
-                >
-                  {copied ? <CheckIcon size={11} /> : <CopyIcon />}
-                </button>
-              </div>
-            </div>
-            <div className="flex items-center justify-between">
-              <span style={{ fontSize: 12, color: "#6B7280" }}>Source</span>
-              <span className="px-2.5 py-0.5 rounded-full" style={{ fontSize: 11, fontWeight: 600, background: "#E3F7F5", color: "#0E7A70" }}>{lead.source}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span style={{ fontSize: 12, color: "#6B7280" }}>Assignee</span>
-              <div className="flex items-center gap-2">
-                <span className="w-6 h-6 rounded-full flex items-center justify-center text-white font-bold" style={{ background: lead.assigneeColor, fontSize: 10 }}>{lead.assigneeInitials}</span>
-                <span style={{ fontSize: 13, fontWeight: 500, color: "#111111" }}>{lead.assignee}</span>
-              </div>
-            </div>
-          </div>
-        </Card>
+        <InfoCard lead={lead} role={role} onLeadChange={onLeadChange} />
 
         {/* Last Contacted */}
         <Card title="Last Contacted">
@@ -703,11 +730,12 @@ function ActivityTab({ lead }: { lead: LeadDetail }) {
 
 // ─── Shared sub-components ────────────────────────────────────────────────────
 
-function Card({ title, children }: { title: string; children: ReactNode }) {
+function Card({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
   return (
     <div className="rounded-xl flex flex-col" style={{ background: "#FFFFFF", border: "1px solid #E3E7EF", overflow: "hidden" }}>
-      <div className="px-4 py-3" style={{ borderBottom: "1px solid #F3F4F6" }}>
+      <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: "1px solid #F3F4F6" }}>
         <h3 style={{ fontSize: 12, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.07em" }}>{title}</h3>
+        {action}
       </div>
       <div className="px-4 py-4">{children}</div>
     </div>
@@ -718,7 +746,7 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between">
       <span style={{ fontSize: 12, color: "#6B7280" }}>{label}</span>
-      <span style={{ fontSize: 13, fontWeight: 500, color: "#111111" }}>{value}</span>
+      <span style={{ fontSize: 13, fontWeight: 500, color: value ? "#111111" : "#9CA3AF" }}>{value || "—"}</span>
     </div>
   );
 }
@@ -732,49 +760,398 @@ function OutcomeBadge({ outcome }: { outcome: string }) {
   );
 }
 
-function CustomFieldValue({ field }: { field: CustomField }) {
-  if (field.type === "toggle") {
-    const on = field.value === true;
+const FIELD_INPUT_STYLE: CSSProperties = {
+  height: 32,
+  width: "100%",
+  minWidth: 0,
+  border: "1.5px solid #E3E7EF",
+  borderRadius: 8,
+  padding: "0 10px",
+  fontSize: 13,
+  color: "#111111",
+  background: "#FFFFFF",
+  outline: "none",
+};
+
+const focusBorder = {
+  onFocus: (e: { currentTarget: HTMLElement }) => { e.currentTarget.style.borderColor = "#2FBEB3"; },
+  onBlur: (e: { currentTarget: HTMLElement }) => { e.currentTarget.style.borderColor = "#E3E7EF"; },
+};
+
+function Toggle({ on, onClick, label }: { on: boolean; onClick: () => void; label: string }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-label={label}
+      onClick={onClick}
+      className="rounded-full flex items-center shrink-0"
+      style={{ width: 36, height: 20, background: on ? "#2FBEB3" : "#D1D5DB", padding: "0 2px", transition: "background 150ms" }}
+    >
+      <span
+        className="rounded-full"
+        style={{ width: 16, height: 16, background: "#FFFFFF", transform: on ? "translateX(16px)" : "translateX(0)", transition: "transform 120ms", boxShadow: "0 1px 2px rgba(0,0,0,0.2)" }}
+      />
+    </button>
+  );
+}
+
+function Segmented({ options, value, onChange, colors }: {
+  options: readonly string[];
+  value: string;
+  onChange: (option: string) => void;
+  colors?: Record<string, string>;
+}) {
+  return (
+    <div className="flex rounded-lg overflow-hidden shrink-0" style={{ border: "1.5px solid #E3E7EF", height: 32 }}>
+      {options.map((option, i) => {
+        const active = value === option;
+        const color = colors?.[option] ?? "#0E7A70";
+        return (
+          <button
+            key={option}
+            type="button"
+            onClick={() => onChange(option)}
+            className="font-semibold"
+            style={{
+              minWidth: 44,
+              paddingInline: 10,
+              fontSize: 12,
+              background: active ? `${color}18` : "#FFFFFF",
+              color: active ? color : "#9CA3AF",
+              borderRight: i < options.length - 1 ? "1px solid #E3E7EF" : undefined,
+              transition: "all 120ms",
+            }}
+          >
+            {option}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function CustomFieldRow({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <div style={{ flexShrink: 0, width: 130 }}>
+        <span style={{ fontSize: 12, color: "#6B7280" }}>{label}</span>
+        {hint && <p style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>{hint}</p>}
+      </div>
+      <div className="flex flex-1 justify-end min-w-0">{children}</div>
+    </div>
+  );
+}
+
+// Parents remount this with `key={value}` so the draft resets after a save.
+function DraftInput({ value, type, placeholder, onSave }: { value: string; type: string; placeholder?: string; onSave: (value: string) => void }) {
+  const [draft, setDraft] = useState(value);
+  return (
+    <input
+      type={type}
+      value={draft}
+      placeholder={placeholder}
+      onChange={(e) => setDraft(e.target.value)}
+      onFocus={focusBorder.onFocus}
+      onBlur={(e) => {
+        focusBorder.onBlur(e);
+        const next = draft.trim();
+        if (next !== value) onSave(next);
+      }}
+      onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+      style={FIELD_INPUT_STYLE}
+    />
+  );
+}
+
+function MonthlyRevenueInput({ value, onSave }: { value: string; onSave: (value: string) => void }) {
+  const initial = parseMonthlyRevenue(value);
+  const [currency, setCurrency] = useState<RevenueCurrency>(initial.currency);
+  const [amount, setAmount] = useState(initial.amount);
+  const [focused, setFocused] = useState(false);
+
+  const commit = (nextCurrency: RevenueCurrency, nextAmount: string) => {
+    const next = formatMonthlyRevenue({ currency: nextCurrency, amount: nextAmount });
+    if (next !== value) onSave(next);
+  };
+
+  const shown = focused || !amount || Number.isNaN(Number(amount))
+    ? amount
+    : Number(amount).toLocaleString(currency === "Rs" ? "en-IN" : "en-US");
+
+  return (
+    <div className="flex items-center gap-2 w-full">
+      <Segmented
+        options={REVENUE_CURRENCIES}
+        value={currency}
+        onChange={(option) => {
+          const next = option as RevenueCurrency;
+          setCurrency(next);
+          commit(next, amount);
+        }}
+      />
+      <input
+        inputMode="decimal"
+        value={shown}
+        placeholder="Amount"
+        onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))}
+        onFocus={(e) => { setFocused(true); focusBorder.onFocus(e); }}
+        onBlur={(e) => { setFocused(false); focusBorder.onBlur(e); commit(currency, amount); }}
+        onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+        style={{ ...FIELD_INPUT_STYLE, flex: 1 }}
+      />
+    </div>
+  );
+}
+
+function CustomFieldEditor({ field, onSave }: { field: CustomField; onSave: (value: string | boolean) => void }) {
+  const stored = typeof field.value === "boolean" ? String(field.value) : field.value ?? "";
+
+  if (field.key === "monthlyRevenue") {
+    return <MonthlyRevenueInput key={stored} value={stored} onSave={onSave} />;
+  }
+  if (field.key === "discoveryCall") {
     return (
-      <button
-        className="rounded-full flex items-center"
-        style={{ width: 36, height: 20, background: on ? "#2FBEB3" : "#D1D5DB", padding: "0 2px" }}
-      >
-        <span
-          className="rounded-full"
-          style={{ width: 16, height: 16, background: "#FFFFFF", transform: on ? "translateX(16px)" : "translateX(0)", transition: "transform 120ms", boxShadow: "0 1px 2px rgba(0,0,0,0.2)" }}
-        />
-      </button>
+      <Segmented
+        options={YES_NO_OPTIONS}
+        value={stored}
+        colors={{ Yes: "#16A34A", No: "#DC2626" }}
+        onChange={(option) => onSave(option === stored ? "" : option)}
+      />
     );
+  }
+  if (field.type === "toggle") {
+    return <Toggle on={field.value === true} onClick={() => onSave(field.value !== true)} label={field.label} />;
   }
   if (field.type === "dropdown") {
+    const options = field.options ?? [];
     return (
-      <span
-        className="px-2.5 py-0.5 rounded-full text-xs font-semibold"
-        style={{ background: `${field.dropdownColor ?? "#6366F1"}18`, color: field.dropdownColor ?? "#6366F1" }}
-      >
-        {String(field.value)}
-      </span>
+      <select value={stored} onChange={(e) => onSave(e.target.value)} {...focusBorder} style={{ ...FIELD_INPUT_STYLE, cursor: "pointer" }}>
+        <option value="">Select…</option>
+        {options.map((option) => <option key={option} value={option}>{option}</option>)}
+        {stored && !options.includes(stored) && <option value={stored}>{stored}</option>}
+      </select>
     );
   }
-  if (field.type === "link") {
+
+  const inputType = field.type === "number" ? "number" : field.type === "date" ? "date" : field.type === "link" ? "url" : "text";
+  return (
+    <div className="flex items-center gap-1.5 w-full">
+      <DraftInput key={stored} value={stored} type={inputType} placeholder={field.type === "link" ? "https://" : undefined} onSave={onSave} />
+      {field.type === "link" && stored && (
+        <a href={stored} target="_blank" rel="noreferrer" title="Open link" className="flex items-center justify-center rounded shrink-0" style={{ width: 28, height: 28, color: "#2FBEB3" }}>
+          <LinkIcon />
+        </a>
+      )}
+    </div>
+  );
+}
+
+interface InfoDraft {
+  company: string;
+  niche: string;
+  contact: string;
+  phone: string;
+  source: string;
+  assignee: string;
+}
+
+function InfoCard({ lead, role, onLeadChange }: { lead: LeadDetail; role: UserRole; onLeadChange: (update: LeadUpdate) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<InfoDraft | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [assignees, setAssignees] = useState<string[]>([]);
+  const [sources, setSources] = useState<string[]>(DEFAULT_SOURCES);
+
+  useEffect(() => {
+    if (!editing || role !== "superadmin") return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const [usersResponse, sourcesResponse] = await Promise.all([fetch("/api/users"), fetch("/api/lead-sources")]);
+        const usersResult = await usersResponse.json().catch(() => ({})) as { users?: { name: string; status: string }[] };
+        const sourcesResult = await sourcesResponse.json().catch(() => ({})) as { sources?: { name: string }[] };
+        if (cancelled) return;
+        setAssignees((usersResult.users ?? []).filter((user) => user.status === "active").map((user) => user.name));
+        if (sourcesResult.sources?.length) setSources(sourcesResult.sources.map((source) => source.name));
+      } catch {
+        // Source stays free-text and the assignee select keeps the current assignee.
+      }
+    };
+    void load();
+    return () => { cancelled = true; };
+  }, [editing, role]);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(lead.phone).catch(() => {});
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  const startEditing = () => {
+    setDraft({ company: lead.company, niche: lead.niche, contact: lead.contact, phone: lead.phone, source: lead.source, assignee: lead.assignee });
+    setError("");
+    setEditing(true);
+  };
+
+  const save = async () => {
+    if (!draft) return;
+    const next = {
+      company: draft.company.trim(),
+      niche: draft.niche.trim(),
+      contact: draft.contact.trim(),
+      phone: draft.phone.trim(),
+      source: draft.source.trim(),
+    };
+    if (!next.company) { setError("Company name is required."); return; }
+
+    const body: Record<string, string> = {};
+    for (const key of Object.keys(next) as (keyof typeof next)[]) {
+      if (next[key] !== lead[key]) body[key] = next[key];
+    }
+    const assigneeName = role === "superadmin" && draft.assignee && draft.assignee !== lead.assignee ? draft.assignee : "";
+    if (assigneeName) body.assigneeName = assigneeName;
+    if (Object.keys(body).length === 0) { setEditing(false); return; }
+
+    setSaving(true);
+    setError("");
+    try {
+      await patchLead(lead.id, body);
+      onLeadChange((prev) => ({
+        ...prev,
+        ...next,
+        ...(assigneeName
+          ? { assignee: assigneeName, assigneeInitials: initials(assigneeName), assigneeColor: assigneeColor(assigneeName) }
+          : {}),
+      }));
+      setEditing(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to save changes.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const editAction = !editing ? (
+    <button
+      type="button"
+      onClick={startEditing}
+      className="flex items-center gap-1 rounded-md font-semibold"
+      style={{ height: 24, paddingInline: 8, fontSize: 11, color: "#0E7A70", background: "#E3F7F5" }}
+    >
+      <PencilIcon /> Edit
+    </button>
+  ) : undefined;
+
+  if (editing && draft) {
+    const setField = (key: keyof InfoDraft) => (e: { target: { value: string } }) => setDraft((prev) => prev && { ...prev, [key]: e.target.value });
+    const assigneeOptions = assignees.includes(lead.assignee) ? assignees : [lead.assignee, ...assignees];
+    const sourceListId = `lead-sources-${lead.id}`;
     return (
-      <a
-        href={String(field.value)}
-        target="_blank"
-        rel="noreferrer"
-        className="flex items-center gap-1"
-        style={{ fontSize: 13, color: "#2FBEB3", fontWeight: 500, textDecoration: "none" }}
-      >
-        <LinkIcon /> View
-      </a>
+      <Card title="Info">
+        <div className="flex flex-col gap-3">
+          <EditRow label="Company">
+            <input value={draft.company} onChange={setField("company")} {...focusBorder} style={FIELD_INPUT_STYLE} autoFocus />
+          </EditRow>
+          <EditRow label="Niche">
+            <input value={draft.niche} onChange={setField("niche")} {...focusBorder} style={FIELD_INPUT_STYLE} />
+          </EditRow>
+          <EditRow label="Contact">
+            <input value={draft.contact} onChange={setField("contact")} {...focusBorder} style={FIELD_INPUT_STYLE} />
+          </EditRow>
+          <EditRow label="Phone">
+            <input type="tel" value={draft.phone} onChange={setField("phone")} {...focusBorder} style={FIELD_INPUT_STYLE} />
+          </EditRow>
+          <EditRow label="Source">
+            <input list={sourceListId} value={draft.source} onChange={setField("source")} {...focusBorder} style={FIELD_INPUT_STYLE} />
+            <datalist id={sourceListId}>
+              {sources.map((source) => <option key={source} value={source} />)}
+            </datalist>
+          </EditRow>
+          <EditRow label="Assignee">
+            {role === "superadmin" ? (
+              <select value={draft.assignee} onChange={setField("assignee")} {...focusBorder} style={{ ...FIELD_INPUT_STYLE, cursor: "pointer" }}>
+                {assigneeOptions.map((name) => <option key={name} value={name}>{name}</option>)}
+              </select>
+            ) : (
+              <span style={{ fontSize: 13, color: "#9CA3AF" }}>{lead.assignee}</span>
+            )}
+          </EditRow>
+          {error && <p role="alert" style={{ fontSize: 12, color: "#DC2626" }}>{error}</p>}
+          <div className="flex justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => { setEditing(false); setError(""); }}
+              className="rounded-lg font-semibold"
+              style={{ height: 32, paddingInline: 14, fontSize: 12, color: "#374151", background: "#F3F4F6" }}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => void save()}
+              disabled={saving}
+              className="rounded-lg font-semibold"
+              style={{ height: 32, paddingInline: 14, fontSize: 12, color: "#FFFFFF", background: "#2FBEB3", opacity: saving ? 0.7 : 1 }}
+            >
+              {saving ? "Saving..." : "Save"}
+            </button>
+          </div>
+        </div>
+      </Card>
     );
   }
-  if (field.type === "number") {
-    const num = Number(field.value);
-    return <span style={{ fontSize: 13, fontWeight: 600, color: "#111111" }}>${num.toLocaleString()}</span>;
-  }
-  return <span style={{ fontSize: 13, fontWeight: 500, color: "#111111" }}>{String(field.value)}</span>;
+
+  return (
+    <Card title="Info" action={editAction}>
+      <div className="flex flex-col gap-3">
+        <InfoRow label="Company" value={lead.company} />
+        <InfoRow label="Niche" value={lead.niche} />
+        <InfoRow label="Contact" value={lead.contact} />
+        <div className="flex items-center justify-between">
+          <span style={{ fontSize: 12, color: "#6B7280" }}>Phone</span>
+          <div className="flex items-center gap-1.5">
+            <span style={{ fontSize: 13, fontWeight: 500, color: lead.phone ? "#111111" : "#9CA3AF" }}>{lead.phone || "—"}</span>
+            {lead.phone && (
+              <button
+                onClick={handleCopy}
+                className="flex items-center justify-center rounded"
+                style={{ width: 22, height: 22, color: copied ? "#2FBEB3" : "#9CA3AF", background: copied ? "#E3F7F5" : "transparent" }}
+                title="Copy phone"
+              >
+                {copied ? <CheckIcon size={11} /> : <CopyIcon />}
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center justify-between">
+          <span style={{ fontSize: 12, color: "#6B7280" }}>Source</span>
+          {lead.source
+            ? <span className="px-2.5 py-0.5 rounded-full" style={{ fontSize: 11, fontWeight: 600, background: "#E3F7F5", color: "#0E7A70" }}>{lead.source}</span>
+            : <span style={{ fontSize: 13, color: "#9CA3AF" }}>—</span>}
+        </div>
+        <div className="flex items-center justify-between">
+          <span style={{ fontSize: 12, color: "#6B7280" }}>Assignee</span>
+          <div className="flex items-center gap-2">
+            <span className="w-6 h-6 rounded-full flex items-center justify-center text-white font-bold" style={{ background: lead.assigneeColor, fontSize: 10 }}>{lead.assigneeInitials}</span>
+            <span style={{ fontSize: 13, fontWeight: 500, color: "#111111" }}>{lead.assignee}</span>
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function EditRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span style={{ fontSize: 12, color: "#6B7280", flexShrink: 0, width: 64 }}>{label}</span>
+      <div className="flex flex-1 justify-end min-w-0">{children}</div>
+    </div>
+  );
 }
 
 function AssigneeModal({ currentAssignee, onCancel, onConfirm }: {
@@ -924,6 +1301,10 @@ export function LeadDetailPanel({ role, leadId, initialTab = "details", onClose,
     );
   }
 
+  const updateLead = (update: LeadUpdate) => {
+    setLead((prev) => (prev ? (typeof update === "function" ? update(prev) : update) : prev));
+  };
+
   const applyStageChange = async (newStage: string, lostReason?: LostReason) => {
     const previous = lead;
     setLead((prev) => prev ? ({
@@ -1070,7 +1451,7 @@ export function LeadDetailPanel({ role, leadId, initialTab = "details", onClose,
         {/* ── Scrollable body */}
         <div className="flex-1 overflow-y-auto" style={{ background: "#F9FAFB" }}>
           {error && <p style={{ padding: "12px 20px 0", fontSize: 13, color: "#DC2626" }}>{error}</p>}
-          {tab === "details" && <DetailsTab lead={lead} role={role} stages={stages} onLeadChange={setLead} onMarkDead={() => requestStageChange("Dead Lead")} />}
+          {tab === "details" && <DetailsTab lead={lead} role={role} stages={stages} onLeadChange={updateLead} onMarkDead={() => requestStageChange("Dead Lead")} />}
           {tab === "activity" && <ActivityTab lead={lead} />}
         </div>
       </div>
