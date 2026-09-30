@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { CLOSED_LOST_OUTCOME, lostReasonCategory } from "@/lib/lost-reasons";
 import { requireProfile, checkRateLimit } from "@/lib/api-auth"; // adjust import path to wherever requireProfile/checkRateLimit actually live
 import { Prisma } from "../../../../generated/prisma/client"; // adjust relative depth if this file moves
 
@@ -129,6 +130,7 @@ export async function GET(request: Request) {
             COUNT(*)::int AS "callsWeek"
           FROM activities
           WHERE created_at >= ${sqlTimestamp(sevenDaysAgo)}
+            AND outcome <> ${CLOSED_LOST_OUTCOME}
           GROUP BY logged_by
         `
       : null,
@@ -260,7 +262,7 @@ export async function GET(request: Request) {
 
     const lostReasonCounts = new Map<string, number>();
     for (const group of lostReasonGroups) {
-      const reason = group.lostReason ?? "Unspecified";
+      const reason = group.lostReason ? lostReasonCategory(group.lostReason) : "Unspecified";
       lostReasonCounts.set(reason, (lostReasonCounts.get(reason) ?? 0) + group._count._all);
     }
     lostReasons = Array.from(lostReasonCounts.entries())

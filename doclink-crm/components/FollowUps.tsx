@@ -119,6 +119,7 @@ const OUTCOME_LABEL: Record<string, string> = {
   callback_requested: "Callback Requested",
   proposal_discussed: "Proposal Discussed",
   meeting_set: "Meeting Set",
+  closed_lost: "Closed Lost",
 };
 
 function outcomeLabel(outcome?: string) {
@@ -559,6 +560,7 @@ export function FollowUps({ role }: { role: UserRole }) {
 
   const handleLogCall = async (data: LogCallForm) => {
     if (!callLead || !data.outcome) return;
+    const completeFollowUp = callLead.urgency === "overdue" && !data.followUpDate && !data.followUpTime;
     const response = await fetch("/api/activities", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -568,10 +570,16 @@ export function FollowUps({ role }: { role: UserRole }) {
         notes: data.notes,
         followUpDate: data.followUpDate || undefined,
         followUpTime: data.followUpTime || undefined,
+        completeFollowUp,
       }),
     });
     const result = await response.json().catch(() => ({})) as { error?: string; calls?: number };
     if (!response.ok) throw new Error(result.error ?? "Unable to save the call log.");
+    if (completeFollowUp) {
+      setItems((prev) => prev.filter((item) => item.id !== callLead.id));
+      setError("");
+      return;
+    }
     const calls = result.calls ?? callLead.calls + 1;
     const note = [outcomeLabel(data.outcome), data.notes].filter(Boolean).join(" — ");
     setItems((prev) => prev.map((item) => item.id === callLead.id ? { ...item, calls, notes: note } : item));

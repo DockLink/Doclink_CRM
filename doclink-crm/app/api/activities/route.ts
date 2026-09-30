@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { checkRateLimit, requireProfile } from "@/lib/api-auth";
+import { CLOSED_LOST_OUTCOME } from "@/lib/lost-reasons";
 
 export async function GET(request: Request) {
   const limited = checkRateLimit(request, "activities");
@@ -36,6 +37,7 @@ export async function POST(request: Request) {
     notes?: string;
     followUpDate?: string;
     followUpTime?: string;
+    completeFollowUp?: boolean;
   };
   const leadId = body.leadId?.trim() ?? "";
   const outcome = body.outcome?.trim() ?? "";
@@ -45,6 +47,7 @@ export async function POST(request: Request) {
   const followUpTime = body.followUpTime?.trim() ? timeOnly(body.followUpTime.trim()) : undefined;
   if (body.followUpDate?.trim() && !followUpDate) return NextResponse.json({ error: "Follow-up date must be YYYY-MM-DD" }, { status: 400 });
   if (body.followUpTime?.trim() && !followUpTime) return NextResponse.json({ error: "Follow-up time must be HH:MM" }, { status: 400 });
+  const clearFollowUp = body.completeFollowUp === true && !followUpDate && !followUpTime;
 
   const saved = await prisma.$transaction(async (transaction) => {
     const lead = await transaction.lead.findUnique({ where: { id: leadId }, select: { id: true } });
@@ -58,9 +61,10 @@ export async function POST(request: Request) {
         lastActivityAt: new Date(),
         ...(followUpDate ? { followUpDate } : {}),
         ...(followUpTime ? { followUpTime } : {}),
+        ...(clearFollowUp ? { followUpDate: null, followUpTime: null } : {}),
       },
     });
-    const calls = await transaction.activity.count({ where: { leadId } });
+    const calls = await transaction.activity.count({ where: { leadId, outcome: { not: CLOSED_LOST_OUTCOME } } });
     return { created, calls };
   });
   if (!saved) return NextResponse.json({ error: "Lead not found" }, { status: 404 });

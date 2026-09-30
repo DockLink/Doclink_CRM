@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type ReactNode, type CSSProperties, type KeyboardEvent } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
@@ -283,6 +283,136 @@ function Sidebar({ role, name, onSignOut }: { role: UserRole; name: string; onSi
   );
 }
 
+// ─── Header search ───────────────────────────────────────────────────────────
+
+type SearchResult = { id: string; company: string; contact: string; phone: string; stage: string };
+
+function HeaderSearch() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<SearchResult[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [highlight, setHighlight] = useState(0);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const term = query.trim();
+    if (!term) {
+      setResults([]);
+      setLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    setLoading(true);
+    const timer = setTimeout(async () => {
+      try {
+        const response = await fetch(`/api/leads?q=${encodeURIComponent(term)}`, { signal: controller.signal });
+        const data = response.ok ? await response.json() as { leads: SearchResult[] } : { leads: [] };
+        setResults(data.leads);
+        setHighlight(0);
+      } catch (error) {
+        if ((error as Error).name !== "AbortError") setResults([]);
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    }, 250);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [query]);
+
+  useEffect(() => {
+    setOpen(false);
+    setQuery("");
+  }, [pathname]);
+
+  useEffect(() => {
+    const handleClick = (event: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  const openLead = (lead: SearchResult) => {
+    setOpen(false);
+    setQuery("");
+    router.push(`/leads/${lead.id}`);
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Escape") {
+      setOpen(false);
+      event.currentTarget.blur();
+    } else if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setOpen(true);
+      setHighlight((i) => Math.min(i + 1, results.length - 1));
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setHighlight((i) => Math.max(i - 1, 0));
+    } else if (event.key === "Enter" && results[highlight]) {
+      event.preventDefault();
+      openLead(results[highlight]);
+    }
+  };
+
+  const showDropdown = open && query.trim().length > 0;
+
+  return (
+    <div ref={containerRef} className="relative w-full" style={{ maxWidth: 380 }}>
+      <span className="absolute left-3 top-1/2 -translate-y-1/2">
+        <SearchIcon />
+      </span>
+      <input
+        type="text"
+        value={query}
+        onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+        onKeyDown={handleKeyDown}
+        placeholder="Search leads by company, contact, phone..."
+        className="w-full h-9 pl-9 pr-3 text-sm rounded-lg border outline-none transition-all"
+        style={{ borderColor: "#E5E7EB", color: "#111111", fontSize: 13 }}
+        onFocus={(e) => { setOpen(true); e.currentTarget.style.borderColor = "#2FBEB3"; e.currentTarget.style.boxShadow = "0 0 0 2px rgba(47,190,179,0.12)"; }}
+        onBlur={(e) => { e.currentTarget.style.borderColor = "#E5E7EB"; e.currentTarget.style.boxShadow = "none"; }}
+      />
+      {showDropdown && (
+        <div
+          className="absolute left-0 right-0 mt-1 rounded-xl shadow-lg border py-1.5 overflow-y-auto"
+          style={{ top: "100%", maxHeight: 360, background: "white", borderColor: "#E5E7EB", zIndex: 50 }}
+        >
+          {loading && results.length === 0 ? (
+            <div className="px-4 py-2.5" style={{ fontSize: 13, color: "#9CA3AF" }}>Searching…</div>
+          ) : results.length === 0 ? (
+            <div className="px-4 py-2.5" style={{ fontSize: 13, color: "#9CA3AF" }}>No leads found</div>
+          ) : (
+            results.map((lead, index) => (
+              <button
+                key={lead.id}
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => openLead(lead)}
+                onMouseEnter={() => setHighlight(index)}
+                className="w-full text-left px-4 py-2 flex items-center justify-between gap-3"
+                style={{ background: index === highlight ? "#F9FAFB" : "transparent", border: "none", cursor: "pointer" }}
+              >
+                <div className="min-w-0">
+                  <div className="truncate" style={{ fontSize: 13, fontWeight: 500, color: "#111111" }}>{lead.company}</div>
+                  <div className="truncate" style={{ fontSize: 11, color: "#6B7280", marginTop: 2 }}>
+                    {[lead.contact, lead.phone].filter(Boolean).join(" · ") || "No contact details"}
+                  </div>
+                </div>
+                <span className="shrink-0" style={{ fontSize: 11, color: "#0E7A70", background: "#E3F7F5", borderRadius: 999, padding: "2px 8px" }}>
+                  {lead.stage}
+                </span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Top bar ──────────────────────────────────────────────────────────────────
 
 function TopBar({ pageTitle, name, onSignOut }: { pageTitle: string; name: string; onSignOut: () => void }) {
@@ -299,19 +429,7 @@ function TopBar({ pageTitle, name, onSignOut }: { pageTitle: string; name: strin
       </h1>
 
       <div className="flex-1 flex justify-center" style={{ maxWidth: 400 }}>
-        <div className="relative w-full" style={{ maxWidth: 380 }}>
-          <span className="absolute left-3 top-1/2 -translate-y-1/2">
-            <SearchIcon />
-          </span>
-          <input
-            type="text"
-            placeholder="Search leads by company, contact, phone..."
-            className="w-full h-9 pl-9 pr-3 text-sm rounded-lg border outline-none transition-all"
-            style={{ borderColor: "#E5E7EB", color: "#111111", fontSize: 13 }}
-            onFocus={(e) => { e.currentTarget.style.borderColor = "#2FBEB3"; e.currentTarget.style.boxShadow = "0 0 0 2px rgba(47,190,179,0.12)"; }}
-            onBlur={(e) => { e.currentTarget.style.borderColor = "#E5E7EB"; e.currentTarget.style.boxShadow = "none"; }}
-          />
-        </div>
+        <HeaderSearch />
       </div>
 
       <div className="flex items-center gap-2 ml-auto">

@@ -1,19 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import {
+  LOST_REASON_OPTIONS,
+  OTHER_LOST_REASON,
+  formatLostReason,
+  type LostReason,
+  type LostReasonOption,
+} from "@/lib/lost-reasons";
 
-// ─── Shared reason options (feeds LostReasonCard on Dashboard) ────────────────
-
-export const LOST_REASON_OPTIONS = [
-  "Price / budget constraints",
-  "Chose a competitor",
-  "No decision / stalled",
-  "Wrong contact / wrong fit",
-  "Timing not right",
-  "Unresponsive / went dark",
-] as const;
-
-export type LostReason = (typeof LOST_REASON_OPTIONS)[number];
+export { LOST_REASON_OPTIONS, type LostReason };
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 
@@ -50,9 +46,12 @@ interface LostReasonModalProps {
 }
 
 export function LostReasonModal({ companyName, onConfirm, onCancel }: LostReasonModalProps) {
-  const [reason, setReason] = useState<LostReason | null>(null);
+  const [reason, setReason] = useState<LostReasonOption | null>(null);
+  const [otherDetail, setOtherDetail] = useState("");
   const [submitted, setSubmitted] = useState(false);
+  const isOther = reason === OTHER_LOST_REASON;
   const reasonError = submitted && !reason;
+  const otherDetailError = submitted && isOther && !otherDetail.trim();
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -65,7 +64,8 @@ export function LostReasonModal({ companyName, onConfirm, onCancel }: LostReason
   const handleConfirm = () => {
     setSubmitted(true);
     if (!reason) return;
-    onConfirm(reason);
+    if (reason === OTHER_LOST_REASON && !otherDetail.trim()) return;
+    onConfirm(formatLostReason(reason, otherDetail));
   };
 
   return (
@@ -172,6 +172,41 @@ export function LostReasonModal({ companyName, onConfirm, onCancel }: LostReason
               </button>
             );
           })}
+
+          {isOther && (
+            <div className="flex flex-col gap-1.5">
+              <label
+                htmlFor="lost-reason-other"
+                style={{ fontSize: 12, fontWeight: 600, color: "#374151" }}
+              >
+                Specify the reason <span style={{ color: "#DC2626" }}>*</span>
+              </label>
+              <textarea
+                id="lost-reason-other"
+                autoFocus
+                rows={3}
+                maxLength={500}
+                value={otherDetail}
+                onChange={(e) => setOtherDetail(e.target.value)}
+                placeholder="Describe why this deal was lost…"
+                className="w-full rounded-lg outline-none resize-none"
+                style={{
+                  padding: "10px 12px",
+                  fontSize: 13,
+                  color: "#111111",
+                  border: `1.5px solid ${otherDetailError ? "#FCA5A5" : "#E3E7EF"}`,
+                  background: otherDetailError ? "#FFF8F8" : "#FFFFFF",
+                }}
+                onFocus={(e) => { if (!otherDetailError) e.currentTarget.style.borderColor = "#57534E"; }}
+                onBlur={(e) => { if (!otherDetailError) e.currentTarget.style.borderColor = "#E3E7EF"; }}
+              />
+              {otherDetailError && (
+                <span className="flex items-center gap-1" style={{ fontSize: 11, color: "#DC2626" }}>
+                  <AlertIcon /> Please describe the reason
+                </span>
+              )}
+            </div>
+          )}
 
           {reasonError && (
             <div

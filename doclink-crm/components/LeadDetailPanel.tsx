@@ -15,7 +15,8 @@ import { nextStageName, stageColor, type PipelineStage } from "@/lib/pipeline-st
 import { usePipelineStages } from "@/lib/use-pipeline-stages";
 import { clearDraft, readDraft, useFormDraft } from "@/lib/use-form-draft";
 import { LogCallModal, type LogCallForm } from "@/components/LogCallModal";
-import { LOST_REASON_OPTIONS, LostReasonModal, type LostReason } from "@/components/LostReasonModal";
+import { LostReasonModal, type LostReason } from "@/components/LostReasonModal";
+import { CLOSED_LOST_OUTCOME } from "@/lib/lost-reasons";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -27,7 +28,8 @@ type CallOutcome =
   | "no_answer"
   | "callback_requested"
   | "proposal_discussed"
-  | "meeting_set";
+  | "meeting_set"
+  | typeof CLOSED_LOST_OUTCOME;
 
 interface ActivityEntry {
   id: string;
@@ -114,6 +116,7 @@ const OUTCOME_META: Record<CallOutcome, { label: string; bg: string; color: stri
   callback_requested: { label: "Callback Requested",  bg: "#EDE9FE", color: "#6366F1" },
   proposal_discussed: { label: "Proposal Discussed",  bg: "#EDE9FE", color: "#6366F1" },
   meeting_set:        { label: "Meeting Set",          bg: "#FEF9C3", color: "#B45309" },
+  closed_lost:        { label: "Closed Lost",          bg: "#FEE2E2", color: "#B91C1C" },
 };
 
 const ASSIGNEES = [
@@ -164,15 +167,19 @@ function timestampLabel(iso: string) {
   });
 }
 
-function toLeadDetail(lead: ApiLeadDetail): LeadDetail {
-  const activity = lead.activities.map((entry) => ({
+function toActivityEntry(entry: ApiLeadDetail["activities"][number]): ActivityEntry {
+  return {
     id: entry.id,
     outcome: entry.outcome,
     notes: entry.notes || "No additional notes.",
     loggedBy: entry.loggedBy,
     timestamp: timestampLabel(entry.createdAt),
     relativeTime: relativeTime(entry.createdAt),
-  }));
+  };
+}
+
+function toLeadDetail(lead: ApiLeadDetail): LeadDetail {
+  const activity = lead.activities.map(toActivityEntry);
   const latest = activity[0];
   return {
     id: lead.id,
@@ -196,7 +203,7 @@ function toLeadDetail(lead: ApiLeadDetail): LeadDetail {
       ? { outcome: latest.outcome, relativeTime: latest.relativeTime, note: latest.notes }
       : null,
     activity,
-    lostReason: LOST_REASON_OPTIONS.find((option) => option === lead.lostReason),
+    lostReason: lead.lostReason ?? undefined,
   };
 }
 
@@ -509,6 +516,9 @@ function DetailsTab({ lead, role, stages, onLeadChange, onMarkDead }: { lead: Le
   };
 
   const nextStage = nextStageName(stages, lead.stage);
+  const showLegacyLostReason = lead.stage === "Closed Lost"
+    && Boolean(lead.lostReason)
+    && lead.lastContacted?.outcome !== CLOSED_LOST_OUTCOME;
 
   return (
     <div className="flex gap-5 p-5">
@@ -651,7 +661,7 @@ function DetailsTab({ lead, role, stages, onLeadChange, onMarkDead }: { lead: Le
         {/* Last Contacted */}
         <Card title="Last Contacted">
           <div className="flex flex-col gap-3">
-            {lead.stage === "Closed Lost" && lead.lostReason && (
+            {showLegacyLostReason && (
               <div className="flex flex-col gap-2">
                 <span
                   className="self-start px-2.5 py-1 rounded-full text-xs font-semibold"
@@ -665,7 +675,7 @@ function DetailsTab({ lead, role, stages, onLeadChange, onMarkDead }: { lead: Le
             {lead.lastContacted ? (
               <div
                 className="flex flex-col gap-2.5"
-                style={lead.stage === "Closed Lost" && lead.lostReason ? { paddingTop: 12, borderTop: "1px solid #F3F4F6" } : undefined}
+                style={showLegacyLostReason ? { paddingTop: 12, borderTop: "1px solid #F3F4F6" } : undefined}
               >
                 <div className="flex items-center justify-between">
                   <OutcomeBadge outcome={lead.lastContacted.outcome} />
@@ -673,7 +683,7 @@ function DetailsTab({ lead, role, stages, onLeadChange, onMarkDead }: { lead: Le
                 </div>
                 <p style={{ fontSize: 13, color: "#374151", lineHeight: 1.6 }}>{lead.lastContacted.note}</p>
               </div>
-            ) : !(lead.stage === "Closed Lost" && lead.lostReason) ? (
+            ) : !showLegacyLostReason ? (
               <p style={{ fontSize: 13, color: "#9CA3AF" }}>No calls logged yet.</p>
             ) : null}
           </div>
@@ -720,7 +730,9 @@ function ActivityTab({ lead }: { lead: LeadDetail }) {
   return (
     <div className="flex flex-col" style={{ padding: "20px 20px 32px" }}>
       <div className="flex items-center justify-between mb-6">
-        <p style={{ fontSize: 13, color: "#6B7280" }}>{lead.activity.length} logged calls</p>
+        <p style={{ fontSize: 13, color: "#6B7280" }}>
+          {lead.activity.filter((entry) => entry.outcome !== CLOSED_LOST_OUTCOME).length} logged calls
+        </p>
       </div>
 
       {/* Timeline */}
@@ -1370,11 +1382,23 @@ export function LeadDetailPanel({ role, leadId, initialTab = "details", onClose,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ids: [lead.id], stage: newStage, lostReason }),
       });
+      const result = await response.json().catch(() => ({})) as {
+        error?: string;
+        activities?: ApiLeadDetail["activities"];
+      };
       if (!response.ok) {
-        const result = await response.json().catch(() => ({})) as { error?: string };
         setLead(previous);
         setError(result.error ?? "Unable to update stage.");
         return;
+      }
+      const created = (result.activities ?? []).map(toActivityEntry);
+      if (created.length > 0) {
+        const latest = created[0];
+        setLead((prev) => prev ? ({
+          ...prev,
+          activity: [...created, ...prev.activity],
+          lastContacted: { outcome: latest.outcome, relativeTime: latest.relativeTime, note: latest.notes },
+        }) : prev);
       }
       setError("");
     } catch {

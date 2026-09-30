@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { priorityForStage, type LeadPriority } from "@/lib/lead-ui";
 import { formatMonthlyRevenue, parseYesNo } from "@/lib/lead-custom-fields";
 import { ensureStandardCustomFields } from "@/lib/standard-custom-fields";
+import { CLOSED_LOST_OUTCOME } from "@/lib/lost-reasons";
 
 const priorityValues = new Set(["hot", "warm", "cold"]);
 
@@ -57,17 +58,29 @@ function serializeLead(lead: {
   };
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   const profile = await getProfile();
   if (!profile) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+  const query = text(new URL(request.url).searchParams.get("q"));
   const leads = await prisma.lead.findMany({
+    where: query
+      ? {
+          OR: [
+            { company: { contains: query, mode: "insensitive" } },
+            { contact: { contains: query, mode: "insensitive" } },
+            { phone: { contains: query } },
+            { niche: { contains: query, mode: "insensitive" } },
+          ],
+        }
+      : undefined,
+    take: query ? 8 : undefined,
     orderBy: { createdAt: "desc" },
     include: {
       stage: { select: { name: true } },
       assignee: { select: { name: true } },
       source: { select: { name: true } },
-      _count: { select: { activities: true } },
+      _count: { select: { activities: { where: { outcome: { not: CLOSED_LOST_OUTCOME } } } } },
       activities: { orderBy: { createdAt: "desc" }, take: 1, select: { outcome: true, notes: true } },
     },
   });
@@ -152,14 +165,33 @@ export async function PATCH(request: Request) {
     data.priority = priorityForStage(stage.name);
     data.lostReason = body.stage === "Closed Lost" ? text(body.lostReason) || null : null;
   }
+  const markingLost = Boolean(data.stageId) && body.stage === "Closed Lost";
   if (body.assigneeName) {
     if (profile.role !== "superadmin") return NextResponse.json({ error: "Only superadmins can reassign leads" }, { status: 403 });
     const assignee = await prisma.user.findFirst({ where: { name: text(body.assigneeName), isActive: true } });
     if (!assignee) return NextResponse.json({ error: "Selected assignee was not found" }, { status: 400 });
     data.assigneeId = assignee.id;
   }
-  await prisma.lead.updateMany({ where: { id: { in: ids } }, data });
-  return NextResponse.json({ updated: ids.length });
+  const activities = await prisma.$transaction(async (tx) => {
+    const newlyLost = markingLost
+      ? await tx.lead.findMany({ where: { id: { in: ids }, stageId: { not: data.stageId } }, select: { id: true } })
+      : [];
+    await tx.lead.updateMany({ where: { id: { in: ids } }, data });
+    return Promise.all(newlyLost.map(({ id }) => tx.activity.create({
+      data: { leadId: id, outcome: CLOSED_LOST_OUTCOME, notes: data.lostReason ?? undefined, loggedBy: profile.id },
+    })));
+  });
+  return NextResponse.json({
+    updated: ids.length,
+    activities: activities.map((activity) => ({
+      id: activity.id,
+      leadId: activity.leadId,
+      outcome: activity.outcome,
+      notes: activity.notes ?? "",
+      loggedBy: profile.name,
+      createdAt: activity.createdAt.toISOString(),
+    })),
+  });
 }
 
 export async function DELETE(request: Request) {
