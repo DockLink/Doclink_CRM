@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { createClient } from "@/lib/supabase/server";
+import { requireProfile } from "@/lib/api-auth";
 import { priorityForStage } from "@/lib/lead-ui";
 import { formatMonthlyRevenue, parseMonthlyRevenue, parseYesNo } from "@/lib/lead-custom-fields";
 import { ensureStandardCustomFields } from "@/lib/standard-custom-fields";
@@ -56,14 +56,8 @@ function dateValue(value: string) {
 
 export async function POST(request: Request) {
   try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-    const profile = await prisma.user.findFirst({
-      where: { OR: [{ id: user.id }, { email: user.email ?? "" }], isActive: true },
-    });
-    if (!profile) return NextResponse.json({ error: "Active CRM user not found" }, { status: 403 });
+    const { profile, response } = await requireProfile(request);
+    if (response) return response;
     if (profile.role !== "superadmin") return NextResponse.json({ error: "Only superadmins can import leads" }, { status: 403 });
 
     const body = await request.json().catch(() => null) as {
@@ -200,10 +194,9 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ imported: leadData.length, skipped, failedRows });
   } catch (error) {
-    console.error("Lead import failed", error);
-    return NextResponse.json(
-      { error: error instanceof Error ? `Import failed: ${error.message}` : "Import failed due to a server error" },
-      { status: 500 },
-    );
+    // Prisma error messages can echo the submitted rows, so only the error kind is logged or returned.
+    const code = typeof error === "object" && error !== null && "code" in error ? String(error.code) : undefined;
+    console.error("Lead import failed", error instanceof Error ? error.name : typeof error, code ?? "");
+    return NextResponse.json({ error: "Import failed due to a server error" }, { status: 500 });
   }
 }

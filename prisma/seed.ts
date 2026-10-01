@@ -33,7 +33,10 @@ const adapter = new PrismaPg({
 const prisma = new PrismaClient({ adapter });
 
 async function main() {
-  const password = process.env.SUPERADMIN_PASSWORD ?? "SuperAdmin@123";
+  const password = process.env.SUPERADMIN_PASSWORD;
+  if (!password || password.length < 8) {
+    throw new Error("SUPERADMIN_PASSWORD (at least 8 characters) is required before running the seed script.");
+  }
   const supabaseAdmin = createClient(resolvedSupabaseUrl, resolvedSupabaseServiceRoleKey, {
     auth: { autoRefreshToken: false, persistSession: false },
   });

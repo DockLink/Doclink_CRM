@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { requireProfile } from "@/lib/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { createClient } from "@/lib/supabase/server";
 
 const USER_COLORS = ["#2FBEB3", "#6366F1", "#F97316", "#16A34A", "#F59E0B", "#EC4899"];
 
@@ -15,41 +15,35 @@ function isPublicSupabaseKey(key: string | undefined) {
   }
 }
 
-async function getProfile() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return null;
-  return prisma.user.findFirst({
-    where: {
-      OR: [
-        { id: user.id },
-        { email: { equals: user.email ?? "", mode: "insensitive" } },
-      ],
-      isActive: true,
-    },
-  });
+async function getProfile(request: Request) {
+  const { profile } = await requireProfile(request);
+  return profile ?? null;
 }
 
-async function getSuperadmin() {
-  const profile = await getProfile();
+async function getSuperadmin(request: Request) {
+  const profile = await getProfile(request);
   return profile?.role === "superadmin" ? profile : null;
 }
 
-function serializeUser(user: { id: string; name: string; email: string; role: "superadmin" | "admin"; isActive: boolean; createdAt: Date }) {
+function serializeAssignee(user: { id: string; name: string; isActive: boolean }) {
   const initials = user.name.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase();
   const color = USER_COLORS[user.name.length % USER_COLORS.length];
-  return { id: user.id, name: user.name, email: user.email, role: user.role, status: user.isActive ? "active" : "inactive", initials, color, createdAt: user.createdAt.toISOString() };
+  return { id: user.id, name: user.name, status: user.isActive ? "active" : "inactive", initials, color };
 }
 
-export async function GET() {
-  const profile = await getProfile();
+function serializeUser(user: { id: string; name: string; email: string; role: "superadmin" | "admin"; isActive: boolean; createdAt: Date }) {
+  return { ...serializeAssignee(user), email: user.email, role: user.role, createdAt: user.createdAt.toISOString() };
+}
+
+export async function GET(request: Request) {
+  const profile = await getProfile(request);
   if (!profile) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const users = await prisma.user.findMany({ orderBy: { createdAt: "asc" } });
-  return NextResponse.json({ users: users.map(serializeUser) });
+  return NextResponse.json({ users: users.map((user) => profile.role === "superadmin" ? serializeUser(user) : serializeAssignee(user)) });
 }
 
 export async function POST(request: Request) {
-  const profile = await getSuperadmin();
+  const profile = await getSuperadmin(request);
   if (!profile) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const body = await request.json() as { name?: string; email?: string; password?: string; role?: "admin" | "superadmin" };
@@ -96,7 +90,7 @@ async function findAuthUserId(admin: ReturnType<typeof createAdminClient>, user:
 }
 
 export async function PATCH(request: Request) {
-  const profile = await getSuperadmin();
+  const profile = await getSuperadmin(request);
   if (!profile) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const body = await request.json() as { id?: string; name?: string; email?: string; role?: "admin" | "superadmin"; password?: string; isActive?: boolean };

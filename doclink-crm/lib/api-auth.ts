@@ -1,3 +1,4 @@
+import "server-only";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { createClient } from "@/lib/supabase/server";
@@ -8,20 +9,23 @@ const rateLimits = new Map<string, RateLimitEntry>();
 const WINDOW_MS = 60_000;
 const MAX_REQUESTS = 120;
 
+// Some CRM profiles predate their Supabase Auth account and have a different id,
+// so a confirmed auth email may stand in for the id, but never override an id match.
+async function findActiveProfile(user: { id: string; email?: string; email_confirmed_at?: string }) {
+  const byId = await prisma.user.findUnique({ where: { id: user.id } });
+  if (byId) return byId.isActive ? byId : null;
+  if (!user.email || !user.email_confirmed_at) return null;
+  return prisma.user.findFirst({
+    where: { email: { equals: user.email, mode: "insensitive" }, isActive: true },
+  });
+}
+
 export async function requireProfile(request: Request) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
 
-  const profile = await prisma.user.findFirst({
-    where: {
-      OR: [
-        { id: user.id },
-        { email: { equals: user.email ?? "", mode: "insensitive" } },
-      ],
-      isActive: true,
-    },
-  });
+  const profile = await findActiveProfile(user);
   if (!profile) return { response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   return { profile };
 }
