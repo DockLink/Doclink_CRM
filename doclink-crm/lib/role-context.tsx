@@ -1,7 +1,6 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { createClient } from "@/lib/supabase/client";
 import { setDraftOwner } from "@/lib/use-form-draft";
 import type { UserRole } from "./types";
 
@@ -13,50 +12,28 @@ const NameContext = createContext<{ name: string; setName: (name: string) => voi
 });
 
 export function RoleProvider({
-  role: initialRole = "admin",
+  role: initialRole,
+  name: initialName,
+  userId,
   children,
 }: {
-  role?: UserRole;
+  role: UserRole;
+  name: string;
+  userId: string;
   children: ReactNode;
 }) {
-  const [role, setRole] = useState<UserRole | null>(null);
-  const [name, setName] = useState("");
+  const [role, setRole] = useState<UserRole>(initialRole);
+  const [name, setName] = useState(initialName);
+  const [draftOwnerReady, setDraftOwnerReady] = useState(false);
 
+  // Forms read drafts while rendering, so they must not mount before the owner is set.
   useEffect(() => {
-    let mounted = true;
-    const supabase = createClient();
+    setDraftOwner(userId);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDraftOwnerReady(true);
+  }, [userId]);
 
-    void supabase.auth.getUser().then(async ({ data: { user } }) => {
-      if (!user?.email) return;
-
-      const { data: profile } = await supabase
-        .from("users")
-        .select("name,role,is_active")
-        .eq("email", user.email)
-        .maybeSingle();
-
-      const profileRole = profile?.is_active && (profile.role === "superadmin" || profile.role === "admin")
-        ? profile.role
-        : null;
-      const metadataRole = user.app_metadata?.role;
-      const resolvedRole = profileRole ?? (
-        metadataRole === "superadmin" || metadataRole === "admin" ? metadataRole : null
-      );
-
-      const profileName = typeof profile?.name === "string" ? profile.name.trim() : "";
-      if (mounted) {
-        setDraftOwner(user.id);
-        setRole(resolvedRole);
-        setName(profileName);
-      }
-    });
-
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  if (!role) return null;
+  if (!draftOwnerReady) return null;
 
   return (
     <RoleContext.Provider value={role}>

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { createClient } from "@/lib/supabase/server";
+import { requireProfile } from "@/lib/api-auth";
 import { priorityForStage, type LeadPriority } from "@/lib/lead-ui";
 import { formatMonthlyRevenue, parseYesNo } from "@/lib/lead-custom-fields";
 import { ensureStandardCustomFields } from "@/lib/standard-custom-fields";
@@ -12,13 +12,9 @@ function text(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-async function getProfile() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return null;
-  return prisma.user.findFirst({
-    where: { OR: [{ id: user.id }, { email: user.email ?? "" }], isActive: true },
-  });
+async function getProfile(request: Request) {
+  const { profile } = await requireProfile(request);
+  return profile ?? null;
 }
 
 function serializeLead(lead: {
@@ -59,7 +55,7 @@ function serializeLead(lead: {
 }
 
 export async function GET(request: Request) {
-  const profile = await getProfile();
+  const profile = await getProfile(request);
   if (!profile) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const query = text(new URL(request.url).searchParams.get("q"));
@@ -88,7 +84,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const profile = await getProfile();
+  const profile = await getProfile(request);
   if (!profile) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await request.json() as {
@@ -101,6 +97,9 @@ export async function POST(request: Request) {
   const company = text(body.company);
   if (!company) return NextResponse.json({ error: "Company name is required" }, { status: 400 });
 
+  if (text(body.assigneeName) && text(body.assigneeName) !== profile.name && profile.role !== "superadmin") {
+    return NextResponse.json({ error: "Only superadmins can assign leads" }, { status: 403 });
+  }
   const stage = await prisma.pipelineStage.findFirst({
     where: { name: text(body.stage) || "New Lead", isActive: true },
   });
@@ -149,7 +148,7 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const profile = await getProfile();
+  const profile = await getProfile(request);
   if (!profile) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await request.json() as { ids?: string[]; stage?: string; assigneeName?: string; lostReason?: string };
@@ -195,7 +194,7 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const profile = await getProfile();
+  const profile = await getProfile(request);
   if (!profile) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (profile.role !== "superadmin") return NextResponse.json({ error: "Only superadmins can delete leads" }, { status: 403 });
 
