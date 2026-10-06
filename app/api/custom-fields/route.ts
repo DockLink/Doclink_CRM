@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireProfile, checkRateLimit, requireRole } from "@/lib/api-auth"; // adjust path to match your actual auth helper location
-import { CustomFieldType } from "../../../../generated/prisma/client"; // adjust relative depth if this file moves
+import { CustomFieldType } from "../../../generated/prisma/client"; // adjust relative depth if this file moves
 
 type ApiFieldType = "text" | "number" | "date" | "dropdown" | "toggle" | "url";
 

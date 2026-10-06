@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { CLOSED_LOST_OUTCOME, lostReasonCategory } from "@/lib/lost-reasons";
 import { requireProfile, checkRateLimit } from "@/lib/api-auth"; // adjust import path to wherever requireProfile/checkRateLimit actually live
-import { Prisma } from "../../../../generated/prisma/client"; // adjust relative depth if this file moves
+import { Prisma } from "../../../generated/prisma/client"; // adjust relative depth if this file moves
 
 // ─── Stage name constants ──────────────────────────────────────────────────
 // These are plain rows in PipelineStage, not an enum, so matching is by name.

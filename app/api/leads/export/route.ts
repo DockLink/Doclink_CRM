@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireProfile, checkRateLimit, requireRole } from "@/lib/api-auth"; // adjust path to match your actual auth helper location
 import { CLOSED_LOST_OUTCOME } from "@/lib/lost-reasons";
 import * as XLSX from "xlsx"; // run `npm install xlsx` if this isn't already a dependency
-import type { Prisma } from "../../../../../generated/prisma/client"; // adjust relative depth if this file moves
+import type { Prisma } from "../../../../generated/prisma/client"; // adjust relative depth if this file moves
 
 function buildWhere(searchParams: URLSearchParams): Prisma.LeadWhereInput {
   const where: Prisma.LeadWhereInput = {};
