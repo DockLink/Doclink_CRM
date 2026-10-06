@@ -1,7 +1,6 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { createClient } from "@/lib/supabase/client";
 import { setDraftOwner } from "@/lib/use-form-draft";
 import type { UserRole } from "./types";
 
@@ -24,32 +23,23 @@ export function RoleProvider({
 
   useEffect(() => {
     let mounted = true;
-    const supabase = createClient();
-
-    void supabase.auth.getUser().then(async ({ data: { user } }) => {
-      if (!user?.email) return;
-
-      const { data: profile } = await supabase
-        .from("users")
-        .select("name,role,is_active")
-        .eq("email", user.email)
-        .maybeSingle();
-
-      const profileRole = profile?.is_active && (profile.role === "superadmin" || profile.role === "admin")
-        ? profile.role
-        : null;
-      const metadataRole = user.app_metadata?.role;
-      const resolvedRole = profileRole ?? (
-        metadataRole === "superadmin" || metadataRole === "admin" ? metadataRole : null
-      );
-
-      const profileName = typeof profile?.name === "string" ? profile.name.trim() : "";
-      if (mounted) {
-        setDraftOwner(user.id);
-        setRole(resolvedRole);
-        setName(profileName);
-      }
-    });
+    void fetch("/api/session")
+      .then(async (response) => {
+        if (!response.ok) return null;
+        const result = (await response.json()) as {
+          session?: { id: string; name: string; role: UserRole };
+        };
+        return result.session ?? null;
+      })
+      .then((session) => {
+        if (!mounted || !session) return;
+        setDraftOwner(session.id);
+        setRole(session.role);
+        setName(session.name.trim());
+      })
+      .catch((error: unknown) => {
+        console.error("Unable to load the authenticated CRM session.", error);
+      });
 
     return () => {
       mounted = false;
