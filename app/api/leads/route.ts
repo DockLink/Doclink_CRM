@@ -6,8 +6,15 @@ import { priorityForStage, type LeadPriority } from "@/lib/lead-ui";
 import { formatMonthlyRevenue, parseYesNo } from "@/lib/lead-custom-fields";
 import { ensureStandardCustomFields } from "@/lib/standard-custom-fields";
 import { CLOSED_LOST_OUTCOME } from "@/lib/lost-reasons";
+import { Prisma } from "../../../generated/prisma/client";
 
 const priorityValues = new Set(["hot", "warm", "cold"]);
+const listSortFields = {
+  company: "company",
+  followUpDate: "followUpDate",
+  createdAt: "createdAt",
+  stageChangedAt: "stageChangedAt",
+} as const;
 
 function text(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -21,6 +28,30 @@ async function getProfile() {
     where: { id: user.id, isActive: true },
   });
 }
+
+const leadListSelect = {
+  id: true,
+  company: true,
+  niche: true,
+  contact: true,
+  phone: true,
+  priority: true,
+  followUpDate: true,
+  followUpTime: true,
+  createdAt: true,
+  stageChangedAt: true,
+  stage: { select: { name: true } },
+  assignee: { select: { name: true } },
+  source: { select: { name: true } },
+  _count: { select: { activities: { where: { outcome: { not: CLOSED_LOST_OUTCOME } } } } },
+  activities: {
+    orderBy: { createdAt: "desc" as const },
+    take: 1,
+    select: { outcome: true, notes: true },
+  },
+} satisfies Prisma.LeadSelect;
+
+type LeadListRow = Prisma.LeadGetPayload<{ select: typeof leadListSelect }>;
 
 function serializeLead(lead: {
   id: string;
@@ -66,37 +97,66 @@ export async function GET(request: Request) {
   const searchParams = new URL(request.url).searchParams;
   const query = text(searchParams.get("q"));
   const followUpsOnly = searchParams.get("followups") === "1";
-  const leads = await prisma.lead.findMany({
-    where: {
-      ...leadAccessWhere(profile),
-      ...(followUpsOnly
-        ? {
-          followUpDate: { not: null },
-          stage: { name: { notIn: ["Closed Won", "Closed Lost", "Dead Lead"] } },
-        }
-        : {}),
-      ...(query
-        ? {
-          OR: [
-            { company: { contains: query, mode: "insensitive" } },
-            { contact: { contains: query, mode: "insensitive" } },
-            { phone: { contains: query } },
-            { niche: { contains: query, mode: "insensitive" } },
-          ],
-        }
-        : {}),
-    },
-    take: query ? 8 : undefined,
-    orderBy: { createdAt: "desc" },
-    include: {
-      stage: { select: { name: true } },
-      assignee: { select: { name: true } },
-      source: { select: { name: true } },
-      _count: { select: { activities: { where: { outcome: { not: CLOSED_LOST_OUTCOME } } } } },
-      activities: { orderBy: { createdAt: "desc" }, take: 1, select: { outcome: true, notes: true } },
-    },
+  const page = Math.max(1, Number(searchParams.get("page") ?? "1") || 1);
+  const requestedPageSize = Number(searchParams.get("pageSize") ?? "25");
+  const pageSize = Math.min(100, Math.max(1, Number.isFinite(requestedPageSize) ? requestedPageSize : 25));
+  const paginated = searchParams.has("page") || searchParams.has("pageSize");
+  const stage = text(searchParams.get("stage"));
+  const assignee = text(searchParams.get("assignee"));
+  const niche = text(searchParams.get("niche"));
+  const priority = text(searchParams.get("priority"));
+  const dateRange = text(searchParams.get("dateRange"));
+  const sort = text(searchParams.get("sort")) as keyof typeof listSortFields;
+  const direction = searchParams.get("direction") === "desc" ? "desc" : "asc";
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const dateFilter = dateRange === "Overdue"
+    ? { followUpDate: { lt: today } }
+    : dateRange === "Today"
+      ? { followUpDate: { gte: today, lt: new Date(today.getTime() + 24 * 60 * 60 * 1000) } }
+      : dateRange === "Next 7 days"
+        ? { followUpDate: { gte: today, lt: new Date(today.getTime() + 8 * 24 * 60 * 60 * 1000) } }
+        : {};
+  const stageFilter = stage
+    ? { name: stage }
+    : followUpsOnly
+      ? { name: { notIn: ["Closed Won", "Closed Lost", "Dead Lead"] } }
+      : undefined;
+  const where = {
+    ...leadAccessWhere(profile),
+    ...(followUpsOnly
+      ? { followUpDate: { not: null } }
+      : {}),
+    ...(stageFilter ? { stage: stageFilter } : {}),
+    ...(assignee ? { assignee: { name: assignee } } : {}),
+    ...(niche ? { niche } : {}),
+    ...(priority && priorityValues.has(priority) ? { priority: priority as "hot" | "warm" | "cold" } : {}),
+    ...dateFilter,
+    ...(query ? {
+      OR: [
+        { company: { contains: query, mode: "insensitive" as const } },
+        { contact: { contains: query, mode: "insensitive" as const } },
+        { phone: { contains: query } },
+        { niche: { contains: query, mode: "insensitive" as const } },
+      ],
+    } : {}),
+  };
+  const orderBy = sort && listSortFields[sort]
+    ? { [listSortFields[sort]]: direction } as const
+    : { createdAt: "desc" as const };
+  const [leads, total] = await Promise.all([
+    prisma.lead.findMany({
+      where,
+      ...(paginated ? { skip: (page - 1) * pageSize, take: pageSize } : query ? { take: 8 } : {}),
+      orderBy,
+      select: leadListSelect,
+    }),
+    paginated ? prisma.lead.count({ where }) : Promise.resolve(0),
+  ]);
+  return NextResponse.json({
+    leads: (leads as LeadListRow[]).map(serializeLead),
+    ...(paginated ? { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) } : {}),
   });
-  return NextResponse.json({ leads: leads.map(serializeLead) });
 }
 
 export async function POST(request: Request) {

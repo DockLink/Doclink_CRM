@@ -51,9 +51,15 @@ export async function GET(
         source: { select: { name: true } },
         activities: {
           orderBy: { createdAt: "desc" },
-          include: { logger: { select: { name: true } } },
+          select: {
+            id: true,
+            outcome: true,
+            notes: true,
+            createdAt: true,
+            logger: { select: { name: true } },
+          },
         },
-        customFieldValues: true,
+        customFieldValues: { select: { customFieldId: true, value: true } },
       },
     }),
     prisma.customField.findMany({

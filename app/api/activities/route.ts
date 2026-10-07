@@ -16,7 +16,14 @@ export async function GET(request: Request) {
       ...(leadId ? { leadId } : {}),
     },
     orderBy: { createdAt: "desc" },
-    include: { logger: { select: { name: true } } },
+    select: {
+      id: true,
+      leadId: true,
+      outcome: true,
+      notes: true,
+      createdAt: true,
+      logger: { select: { name: true } },
+    },
   });
   return NextResponse.json({ activities: activities.map((activity) => ({
     id: activity.id,
