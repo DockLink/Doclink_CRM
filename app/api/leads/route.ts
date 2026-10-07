@@ -63,10 +63,18 @@ export async function GET(request: Request) {
   const profile = await getProfile();
   if (!profile) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const query = text(new URL(request.url).searchParams.get("q"));
+  const searchParams = new URL(request.url).searchParams;
+  const query = text(searchParams.get("q"));
+  const followUpsOnly = searchParams.get("followups") === "1";
   const leads = await prisma.lead.findMany({
     where: {
       ...leadAccessWhere(profile),
+      ...(followUpsOnly
+        ? {
+          followUpDate: { not: null },
+          stage: { name: { notIn: ["Closed Won", "Closed Lost", "Dead Lead"] } },
+        }
+        : {}),
       ...(query
         ? {
           OR: [

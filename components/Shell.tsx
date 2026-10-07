@@ -439,16 +439,18 @@ function TopBar({ pageTitle, name, onSignOut }: { pageTitle: string; name: strin
 
   const loadNotificationSummary = useCallback(async () => {
     try {
-      const response = await fetch(`/api/dashboard?tzOffset=${new Date().getTimezoneOffset()}`);
+      const response = await fetch(`/api/followups/summary?tzOffset=${new Date().getTimezoneOffset()}`);
       const result = await response.json() as {
-        followUps?: { today?: unknown[]; missed?: unknown[]; upcoming?: unknown[] };
+        today?: number;
+        missed?: number;
+        upcoming?: number;
         error?: string;
       };
       if (!response.ok) throw new Error(result.error ?? "Unable to load follow-up notifications.");
       setNotificationSummary({
-        today: result.followUps?.today?.length ?? 0,
-        missed: result.followUps?.missed?.length ?? 0,
-        upcoming: result.followUps?.upcoming?.length ?? 0,
+        today: result.today ?? 0,
+        missed: result.missed ?? 0,
+        upcoming: result.upcoming ?? 0,
       });
       setNotificationError("");
     } catch (error) {

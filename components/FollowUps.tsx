@@ -495,7 +495,7 @@ export function FollowUps({ role }: { role: UserRole }) {
   useEffect(() => {
     const load = async () => {
       try {
-        const response = await fetch("/api/leads");
+        const response = await fetch("/api/leads?followups=1");
         const result = await response.json() as { leads?: ApiLead[]; error?: string };
         if (!response.ok) {
           setError(result.error ?? "Unable to load follow-ups.");
