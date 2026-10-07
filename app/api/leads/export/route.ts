@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireProfile, checkRateLimit, requireRole } from "@/lib/api-auth"; // adjust path to match your actual auth helper location
+import { leadAccessWhere, requireProfile, checkRateLimit, requireRole } from "@/lib/api-auth";
 import { CLOSED_LOST_OUTCOME } from "@/lib/lost-reasons";
 import * as XLSX from "xlsx"; // run `npm install xlsx` if this isn't already a dependency
 import type { Prisma } from "../../../../generated/prisma/client"; // adjust relative depth if this file moves
@@ -61,7 +61,7 @@ export async function GET(request: Request) {
         select: { id: true, name: true },
       }),
       prisma.lead.findMany({
-        where: { niche: { not: null } },
+        where: { niche: { not: null }, ...leadAccessWhere(profile) },
         distinct: ["niche"],
         select: { niche: true },
       }),
@@ -73,7 +73,7 @@ export async function GET(request: Request) {
     });
   }
 
-  const where = buildWhere(searchParams);
+  const where = { ...leadAccessWhere(profile), ...buildWhere(searchParams) };
 
   // ─── Live count preview (no file generated) ───────────────────────────
   if (searchParams.get("count") === "1") {

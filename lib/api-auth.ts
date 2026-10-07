@@ -14,13 +14,7 @@ export async function requireProfile(request: Request) {
   if (!user) return { response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
 
   const profile = await prisma.user.findFirst({
-    where: {
-      OR: [
-        { id: user.id },
-        { email: { equals: user.email ?? "", mode: "insensitive" } },
-      ],
-      isActive: true,
-    },
+    where: { id: user.id, isActive: true },
   });
   if (!profile) return { response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   return { profile };
@@ -44,4 +38,8 @@ export function checkRateLimit(request: Request, key: string, max = MAX_REQUESTS
 
 export function requireRole(profile: { role: string }, role: "superadmin" | "admin") {
   return profile.role === role ? null : NextResponse.json({ error: "Forbidden" }, { status: 403 });
+}
+
+export function leadAccessWhere(profile: { id: string; role: string }) {
+  return profile.role === "superadmin" ? {} : { assigneeId: profile.id };
 }

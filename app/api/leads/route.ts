@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { createClient } from "@/lib/supabase/server";
+import { leadAccessWhere } from "@/lib/api-auth";
 import { priorityForStage, type LeadPriority } from "@/lib/lead-ui";
 import { formatMonthlyRevenue, parseYesNo } from "@/lib/lead-custom-fields";
 import { ensureStandardCustomFields } from "@/lib/standard-custom-fields";
@@ -17,7 +18,7 @@ async function getProfile() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
   return prisma.user.findFirst({
-    where: { OR: [{ id: user.id }, { email: user.email ?? "" }], isActive: true },
+    where: { id: user.id, isActive: true },
   });
 }
 
@@ -64,8 +65,10 @@ export async function GET(request: Request) {
 
   const query = text(new URL(request.url).searchParams.get("q"));
   const leads = await prisma.lead.findMany({
-    where: query
-      ? {
+    where: {
+      ...leadAccessWhere(profile),
+      ...(query
+        ? {
           OR: [
             { company: { contains: query, mode: "insensitive" } },
             { contact: { contains: query, mode: "insensitive" } },
@@ -73,7 +76,8 @@ export async function GET(request: Request) {
             { niche: { contains: query, mode: "insensitive" } },
           ],
         }
-      : undefined,
+        : {}),
+    },
     take: query ? 8 : undefined,
     orderBy: { createdAt: "desc" },
     include: {
@@ -104,7 +108,7 @@ export async function POST(request: Request) {
   const stage = await prisma.pipelineStage.findFirst({
     where: { name: text(body.stage) || "New Lead", isActive: true },
   });
-  const assignee = text(body.assigneeName)
+  const assignee = profile.role === "superadmin" && text(body.assigneeName)
     ? await prisma.user.findFirst({ where: { name: text(body.assigneeName), isActive: true } })
     : profile;
   if (!stage) return NextResponse.json({ error: "Selected stage was not found" }, { status: 400 });
@@ -173,14 +177,20 @@ export async function PATCH(request: Request) {
     data.assigneeId = assignee.id;
   }
   const activities = await prisma.$transaction(async (tx) => {
+    const accessibleLeads = await tx.lead.findMany({
+      where: { id: { in: ids }, ...leadAccessWhere(profile) },
+      select: { id: true, stageId: true },
+    });
+    if (accessibleLeads.length !== ids.length) return null;
     const newlyLost = markingLost
-      ? await tx.lead.findMany({ where: { id: { in: ids }, stageId: { not: data.stageId } }, select: { id: true } })
+      ? accessibleLeads.filter((lead) => lead.stageId !== data.stageId)
       : [];
-    await tx.lead.updateMany({ where: { id: { in: ids } }, data });
+    await tx.lead.updateMany({ where: { id: { in: ids }, ...leadAccessWhere(profile) }, data });
     return Promise.all(newlyLost.map(({ id }) => tx.activity.create({
       data: { leadId: id, outcome: CLOSED_LOST_OUTCOME, notes: data.lostReason ?? undefined, loggedBy: profile.id },
     })));
   });
+  if (!activities) return NextResponse.json({ error: "One or more leads were not found" }, { status: 404 });
   return NextResponse.json({
     updated: ids.length,
     activities: activities.map((activity) => ({
@@ -202,6 +212,6 @@ export async function DELETE(request: Request) {
   const body = await request.json() as { ids?: string[] };
   const ids = Array.isArray(body.ids) ? body.ids.filter((id): id is string => typeof id === "string") : [];
   if (ids.length === 0) return NextResponse.json({ error: "At least one lead id is required" }, { status: 400 });
-  const result = await prisma.lead.deleteMany({ where: { id: { in: ids } } });
+  const result = await prisma.lead.deleteMany({ where: { id: { in: ids }, ...leadAccessWhere(profile) } });
   return NextResponse.json({ deleted: result.count });
 }

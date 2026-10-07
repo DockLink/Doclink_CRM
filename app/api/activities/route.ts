@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { checkRateLimit, requireProfile } from "@/lib/api-auth";
+import { checkRateLimit, leadAccessWhere, requireProfile } from "@/lib/api-auth";
 import { CLOSED_LOST_OUTCOME } from "@/lib/lost-reasons";
 
 export async function GET(request: Request) {
@@ -11,7 +11,10 @@ export async function GET(request: Request) {
 
   const leadId = new URL(request.url).searchParams.get("leadId");
   const activities = await prisma.activity.findMany({
-    where: leadId ? { leadId } : undefined,
+    where: {
+      lead: leadAccessWhere(profile),
+      ...(leadId ? { leadId } : {}),
+    },
     orderBy: { createdAt: "desc" },
     include: { logger: { select: { name: true } } },
   });
@@ -50,7 +53,10 @@ export async function POST(request: Request) {
   const clearFollowUp = body.completeFollowUp === true && !followUpDate && !followUpTime;
 
   const saved = await prisma.$transaction(async (transaction) => {
-    const lead = await transaction.lead.findUnique({ where: { id: leadId }, select: { id: true } });
+    const lead = await transaction.lead.findFirst({
+      where: { id: leadId, ...leadAccessWhere(profile) },
+      select: { id: true },
+    });
     if (!lead) return null;
     const created = await transaction.activity.create({
       data: { leadId, outcome, notes: body.notes?.trim() || undefined, loggedBy: profile.id },

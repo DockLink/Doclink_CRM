@@ -21,10 +21,7 @@ async function getProfile() {
   if (!user) return null;
   return prisma.user.findFirst({
     where: {
-      OR: [
-        { id: user.id },
-        { email: { equals: user.email ?? "", mode: "insensitive" } },
-      ],
+      id: user.id,
       isActive: true,
     },
   });
@@ -43,7 +40,7 @@ function serializeUser(user: { id: string; name: string; email: string; role: "s
 
 export async function GET() {
   const profile = await getProfile();
-  if (!profile) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!profile || profile.role !== "superadmin") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const users = await prisma.user.findMany({ orderBy: { createdAt: "asc" } });
   return NextResponse.json({ users: users.map(serializeUser) });
 }

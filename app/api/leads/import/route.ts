@@ -61,7 +61,7 @@ export async function POST(request: Request) {
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const profile = await prisma.user.findFirst({
-      where: { OR: [{ id: user.id }, { email: user.email ?? "" }], isActive: true },
+      where: { id: user.id, isActive: true },
     });
     if (!profile) return NextResponse.json({ error: "Active CRM user not found" }, { status: 403 });
     if (profile.role !== "superadmin") return NextResponse.json({ error: "Only superadmins can import leads" }, { status: 403 });
@@ -200,7 +200,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ imported: leadData.length, skipped, failedRows });
   } catch (error) {
-    console.error("Lead import failed", error);
+    console.error("Lead import failed", error instanceof Error ? error.message : "Unknown error");
     return NextResponse.json(
       { error: error instanceof Error ? `Import failed: ${error.message}` : "Import failed due to a server error" },
       { status: 500 },
