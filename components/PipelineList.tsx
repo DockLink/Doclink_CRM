@@ -7,6 +7,7 @@ import type { UserRole } from "@/lib/types";
 import { assigneeColor, displayDate, displayTime, initials, type ApiLead, urgencyFor } from "@/lib/lead-ui";
 import { activeStages, stageColor, type PipelineStage } from "@/lib/pipeline-stages";
 import { usePipelineStages } from "@/lib/use-pipeline-stages";
+import { notifyCrmDataChanged } from "@/lib/crm-invalidation";
 
 // ─── Palette ──────────────────────────────────────────────────────────────────
 
@@ -535,6 +536,7 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
         const response = await fetch("/api/users");
         const result = await response.json() as { users?: Array<AssignableUser & { status: string }> };
         if (!response.ok) return;
+        notifyCrmDataChanged("leads", "followups", "dashboard", "notifications");
         setAssignees((result.users ?? []).filter((user) => user.status === "active"));
       } catch {
         setAssignees([]);
@@ -608,6 +610,7 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
       body: JSON.stringify({ ids: [...selected], assigneeName: assignee.name }),
     });
     if (!response.ok) return;
+    notifyCrmDataChanged("leads", "followups", "dashboard", "notifications");
     setLeads((prev) => prev.map((lead) => selected.has(lead.id)
       ? { ...lead, assigneeName: assignee.name, assigneeInitials: assignee.initials, assigneeColor: assignee.color }
       : lead));

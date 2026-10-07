@@ -7,6 +7,7 @@ import { usePipelineStages } from "@/lib/use-pipeline-stages";
 import { priorityForStage } from "@/lib/lead-ui";
 import { REVENUE_CURRENCIES, YES_NO_OPTIONS, type RevenueCurrency, type YesNo } from "@/lib/lead-custom-fields";
 import { readDraft, useFormDraft } from "@/lib/use-form-draft";
+import { notifyCrmDataChanged } from "@/lib/crm-invalidation";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -422,6 +423,7 @@ export function AddLeadModal({ mode = "add", role, showValidation = false, onClo
         setSaveError(result.error ?? "Unable to save lead.");
         return;
       }
+      notifyCrmDataChanged("leads", "followups", "dashboard", "notifications");
       clearDraft();
       onClose?.();
     } catch {

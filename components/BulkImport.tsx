@@ -5,6 +5,7 @@ import * as XLSX from "xlsx";
 import type { UserRole } from "@/lib/types";
 import { REVENUE_CURRENCIES, type RevenueCurrency } from "@/lib/lead-custom-fields";
 import { isSensitiveField, readDraft, useFormDraft } from "@/lib/use-form-draft";
+import { notifyCrmDataChanged } from "@/lib/crm-invalidation";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -650,6 +651,7 @@ function Step3({ rows, mappings, assigneeName, revenueCurrency, dupAction, onDup
         setError(result.error ?? `Unable to import leads (server responded ${response.status}).`);
         return;
       }
+      notifyCrmDataChanged("leads", "followups", "dashboard", "notifications");
       const failedRows = result.failedRows ?? [];
       onNext({ imported: result.imported ?? 0, skipped: result.skipped ?? 0, failed: failedRows.length, failedRows });
     } catch {

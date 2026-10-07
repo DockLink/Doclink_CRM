@@ -79,14 +79,15 @@ export async function GET(request: Request) {
   if (response) return response;
 
   const isSuperadmin = profile.role === "superadmin";
+  const canViewCompanyData = profile.role === "superadmin" || profile.role === "admin";
 
   const now = new Date();
   const today = startOfDay(now);
   const in7Days = new Date(today.getTime() + 7 * DAY_MS);
   const fourteenDaysAgo = new Date(now.getTime() - 14 * DAY_MS);
   const sevenDaysAgo = new Date(now.getTime() - 7 * DAY_MS);
-  const leadScopeSql = isSuperadmin ? Prisma.empty : Prisma.sql`WHERE assignee_id = ${profile.id}`;
-  const activityScopeSql = isSuperadmin ? Prisma.empty : Prisma.sql`AND logged_by = ${profile.id}`;
+  const leadScopeSql = canViewCompanyData ? Prisma.empty : Prisma.sql`WHERE assignee_id = ${profile.id}`;
+  const activityScopeSql = canViewCompanyData ? Prisma.empty : Prisma.sql`AND logged_by = ${profile.id}`;
 
   // ─── Scope: admin and superadmin both see company-wide data ──────────────
   // Every query below is independent, so they all run in a single parallel

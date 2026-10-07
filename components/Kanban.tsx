@@ -8,6 +8,7 @@ import { LostReasonModal, type LostReason } from "@/components/LostReasonModal";
 import { assigneeColor, displayDate, initials, priorityForStage, type ApiLead, urgencyFor } from "@/lib/lead-ui";
 import { activeStages, stageColor, type PipelineStage } from "@/lib/pipeline-stages";
 import { usePipelineStages } from "@/lib/use-pipeline-stages";
+import { notifyCrmDataChanged } from "@/lib/crm-invalidation";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -589,6 +590,7 @@ export function Kanban({ role }: { role: UserRole }) {
       return;
     }
     setError("");
+    notifyCrmDataChanged("leads", "followups", "dashboard", "notifications");
     setLeads((prev) =>
       prev.map((l) =>
         l.id === leadId

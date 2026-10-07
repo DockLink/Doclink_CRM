@@ -41,5 +41,8 @@ export function requireRole(profile: { role: string }, role: "superadmin" | "adm
 }
 
 export function leadAccessWhere(profile: { id: string; role: string }) {
-  return profile.role === "superadmin" ? {} : { assigneeId: profile.id };
+  // Both authenticated CRM roles have company-wide read access. Mutation
+  // endpoints still enforce their separate superadmin-only authorization rules.
+  if (profile.role === "superadmin" || profile.role === "admin") return {};
+  return { assigneeId: profile.id };
 }

@@ -17,6 +17,7 @@ import { clearDraft, readDraft, useFormDraft } from "@/lib/use-form-draft";
 import { LogCallModal, type LogCallForm } from "@/components/LogCallModal";
 import { LostReasonModal, type LostReason } from "@/components/LostReasonModal";
 import { CLOSED_LOST_OUTCOME } from "@/lib/lost-reasons";
+import { notifyCrmDataChanged } from "@/lib/crm-invalidation";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -89,6 +90,7 @@ async function patchLead(leadId: string, body: Record<string, unknown>) {
   });
   const result = await response.json().catch(() => ({})) as LeadPatchResult;
   if (!response.ok) throw new Error(result.error ?? "Unable to save changes.");
+  notifyCrmDataChanged("leads", "followups", "dashboard", "notifications");
   return result;
 }
 
@@ -513,6 +515,7 @@ function DetailsTab({ lead, role, stages, onLeadChange, onMarkDead }: { lead: Le
         ? { followUpDate: data.followUpDate, followUpTime: data.followUpTime }
         : {}),
     });
+    notifyCrmDataChanged("leads", "followups", "dashboard", "notifications");
   };
 
   const nextStage = nextStageName(stages, lead.stage);
@@ -1401,6 +1404,7 @@ export function LeadDetailPanel({ role, leadId, initialTab = "details", onClose,
         }) : prev);
       }
       setError("");
+      notifyCrmDataChanged("leads", "followups", "dashboard", "notifications");
     } catch {
       setLead(previous);
       setError("Unable to update stage.");

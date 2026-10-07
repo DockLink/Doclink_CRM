@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { PAGE_ROUTES, pageTitleForPath, pathnameToPage, type UserRole } from "@/lib/types";
 import { useDisplayName, useRole } from "@/lib/role-context";
 import { clearAllDrafts } from "@/lib/use-form-draft";
+import { onCrmDataChanged } from "@/lib/crm-invalidation";
 
 export type { UserRole };
 
@@ -471,6 +472,11 @@ function TopBar({ pageTitle, name, onSignOut }: { pageTitle: string; name: strin
       window.clearInterval(timer);
     };
   }, [loadNotificationSummary]);
+
+  useEffect(() => onCrmDataChanged(
+    ["leads", "followups", "notifications"],
+    () => void loadNotificationSummary(),
+  ), [loadNotificationSummary]);
 
   const openFollowUps = (section: "today" | "missed" | "upcoming") => {
     setNotifOpen(false);

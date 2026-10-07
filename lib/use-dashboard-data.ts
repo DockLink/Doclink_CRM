@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { onCrmDataChanged } from "@/lib/crm-invalidation";
 
 export interface DashboardFollowUp {
   id: string;
@@ -81,6 +82,15 @@ export function useDashboardData() {
 
   useEffect(() => {
     void load();
+    const removeInvalidationListener = onCrmDataChanged(
+      ["leads", "followups", "dashboard"],
+      () => void load(),
+    );
+    const timer = window.setInterval(() => void load(), 60_000);
+    return () => {
+      removeInvalidationListener();
+      window.clearInterval(timer);
+    };
   }, [load]);
 
   return { data, loading, error, reload: load };
