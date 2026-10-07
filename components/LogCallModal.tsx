@@ -54,7 +54,7 @@ const OUTCOMES: { key: Exclude<Outcome, null>; meta: OutcomeMeta }[] = [
 ];
 
 // Outcomes that require a follow-up schedule
-const REQUIRES_FOLLOWUP = new Set<Exclude<Outcome, null>>(["no_answer", "callback_requested"]);
+const REQUIRES_FOLLOWUP = new Set<Exclude<Outcome, null>>(["no_answer", "callback_requested","meeting_set"]);
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 

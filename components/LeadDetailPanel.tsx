@@ -931,7 +931,7 @@ function MonthlyRevenueInput({ value, draftKey, onSave }: { value: string; draft
 
   const shown = focused || !amount || Number.isNaN(Number(amount))
     ? amount
-    : Number(amount).toLocaleString(currency === "Rs" ? "en-IN" : "en-US");
+    : Number(amount).toLocaleString(currency === "LKR" ? "en-LK" : "en-US");
 
   return (
     <div className="flex items-center gap-2 w-full">

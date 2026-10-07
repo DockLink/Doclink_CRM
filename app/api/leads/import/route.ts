@@ -124,7 +124,7 @@ export async function POST(request: Request) {
     const existingKeys = new Set(existingLeads.map((lead) => `${lead.company.trim().toLowerCase()}|${lead.phone ?? ""}`));
 
     const standardIds = await ensureStandardCustomFields();
-    const revenueCurrency = body.revenueCurrency === "$" ? "$" : "Rs";
+    const revenueCurrency = body.revenueCurrency === "$" ? "$" : "LKR";
 
     const failedRows: Array<{ row: number; error: string }> = [];
     let skipped = 0;

@@ -191,7 +191,7 @@ export async function POST(request: Request) {
 
   const standardIds = await ensureStandardCustomFields();
   const monthlyRevenue = formatMonthlyRevenue({
-    currency: body.monthlyRevenue?.currency === "$" ? "$" : "Rs",
+    currency: body.monthlyRevenue?.currency === "$" ? "$" : "LKR",
     amount: text(body.monthlyRevenue?.amount),
   });
   const discoveryCall = parseYesNo(body.discoveryCall);
