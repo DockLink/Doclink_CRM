@@ -141,3 +141,31 @@ export async function PATCH(request: Request) {
   const field = await prisma.customField.update({ where: { id: body.id }, data });
   return NextResponse.json({ field: serialize(field) });
 }
+
+export async function DELETE(request: Request) {
+  const limited = checkRateLimit(request, "custom-fields");
+  if (limited) return limited;
+
+  const { profile, response } = await requireProfile(request);
+  if (response) return response;
+
+  const forbidden = requireRole(profile, "superadmin");
+  if (forbidden) return forbidden;
+
+  const id = new URL(request.url).searchParams.get("id");
+  if (!id) return NextResponse.json({ error: "id is required." }, { status: 400 });
+
+  const field = await prisma.customField.findUnique({
+    where: { id },
+    select: { id: true, _count: { select: { values: true } } },
+  });
+  if (!field) return NextResponse.json({ error: "Custom field not found." }, { status: 404 });
+  if (field._count.values > 0) {
+    return NextResponse.json({
+      error: "This custom field has saved lead values and cannot be permanently deleted. Deactivate it instead.",
+    }, { status: 409 });
+  }
+
+  await prisma.customField.delete({ where: { id } });
+  return NextResponse.json({ deleted: true });
+}
