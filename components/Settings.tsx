@@ -439,6 +439,22 @@ function UsersFrame() {
     replaceUser(result.user);
   };
 
+  const deleteUser = async (user: User) => {
+    if (!window.confirm(`Permanently delete ${user.name}? This cannot be undone.`)) return;
+    setActionError("");
+    try {
+      const response = await fetch(`/api/users?id=${encodeURIComponent(user.id)}`, { method: "DELETE" });
+      const result = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) {
+        setActionError(result.error ?? "Unable to permanently delete user.");
+        return;
+      }
+      setUsers((prev) => prev.filter((entry) => entry.id !== user.id));
+    } catch {
+      setActionError("Unable to reach the server. Please try again.");
+    }
+  };
+
   return (
     <div>
       <SectionHeader title="User Management" action={<PrimaryBtn onClick={() => setShowAdd(true)}>+ Add User</PrimaryBtn>} />
@@ -487,6 +503,7 @@ function UsersFrame() {
                       <span title={u.role === "superadmin" ? "Cannot deactivate superadmin" : ""}>
                         <Toggle on={u.status === "active"} onChange={() => { if (u.role !== "superadmin") void toggleStatus(u); }} />
                       </span>
+                      <IconBtn danger title={u.role === "superadmin" ? "Cannot delete superadmin" : "Permanently delete"} disabled={u.role === "superadmin"} onClick={() => void deleteUser(u)}><TrashIcon /></IconBtn>
                     </div>
                   </td>
                 </tr>
@@ -1087,6 +1104,22 @@ function CustomFieldsFrame() {
     }
   };
 
+  const deleteField = async (field: CustomField) => {
+    if (!window.confirm(`Permanently delete the "${field.label}" field? This cannot be undone.`)) return;
+    setError("");
+    try {
+      const response = await fetch(`/api/custom-fields?id=${encodeURIComponent(field.id)}`, { method: "DELETE" });
+      const result = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) {
+        setError(result.error ?? "Unable to permanently delete field.");
+        return;
+      }
+      setFields((prev) => prev.filter((entry) => entry.id !== field.id));
+    } catch {
+      setError("Unable to reach the server. Please try again.");
+    }
+  };
+
   return (
     <div>
       <SectionHeader title="Custom Fields" sub="These fields appear on every lead's detail panel and forms." action={<PrimaryBtn onClick={() => setShowAdd(true)}>+ Add Custom Field</PrimaryBtn>} />
@@ -1124,6 +1157,7 @@ function CustomFieldsFrame() {
                   <td style={{ padding: "12px 16px" }}>
                     <div className="flex items-center justify-end gap-1">
                       <IconBtn title="Edit" onClick={() => setEditingField(f)}><PencilIcon /></IconBtn>
+                      <IconBtn danger title="Permanently delete" onClick={() => void deleteField(f)}><TrashIcon /></IconBtn>
                     </div>
                   </td>
                 </tr>

@@ -21,10 +21,7 @@ async function getProfile() {
   if (!user) return null;
   return prisma.user.findFirst({
     where: {
-      OR: [
-        { id: user.id },
-        { email: { equals: user.email ?? "", mode: "insensitive" } },
-      ],
+      id: user.id,
       isActive: true,
     },
   });
@@ -43,7 +40,7 @@ function serializeUser(user: { id: string; name: string; email: string; role: "s
 
 export async function GET() {
   const profile = await getProfile();
-  if (!profile) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!profile || profile.role !== "superadmin") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const users = await prisma.user.findMany({ orderBy: { createdAt: "asc" } });
   return NextResponse.json({ users: users.map(serializeUser) });
 }
@@ -162,4 +159,44 @@ export async function PATCH(request: Request) {
     ? await prisma.user.update({ where: { id: target.id }, data })
     : target;
   return NextResponse.json({ user: serializeUser(user) });
+}
+
+export async function DELETE(request: Request) {
+  const profile = await getSuperadmin();
+  if (!profile) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+  const id = new URL(request.url).searchParams.get("id");
+  if (!id) return NextResponse.json({ error: "User id is required" }, { status: 400 });
+  if (id === profile.id) return NextResponse.json({ error: "You cannot permanently delete your own account" }, { status: 400 });
+
+  const target = await prisma.user.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      email: true,
+      role: true,
+      _count: { select: { assignedLeads: true, createdLeads: true, loggedCalls: true } },
+    },
+  });
+  if (!target) return NextResponse.json({ error: "User not found" }, { status: 404 });
+  if (target.role === "superadmin") return NextResponse.json({ error: "Superadmin accounts cannot be permanently deleted" }, { status: 400 });
+
+  const references = target._count.assignedLeads + target._count.createdLeads + target._count.loggedCalls;
+  if (references > 0) {
+    return NextResponse.json({
+      error: "This user has leads or activity history and cannot be permanently deleted. Deactivate the user instead.",
+    }, { status: 409 });
+  }
+
+  if (isPublicSupabaseKey(process.env.SUPABASE_SERVICE_ROLE_KEY)) {
+    return NextResponse.json({ error: "Server configuration error: SUPABASE_SERVICE_ROLE_KEY must be the Supabase service_role secret, not the anon public key" }, { status: 500 });
+  }
+
+  await prisma.user.delete({ where: { id } });
+  const admin = createAdminClient();
+  const { error: authError } = await admin.auth.admin.deleteUser(id);
+  if (authError) {
+    return NextResponse.json({ error: "CRM profile deleted, but the login account could not be removed. Contact an administrator." }, { status: 500 });
+  }
+  return NextResponse.json({ deleted: true });
 }

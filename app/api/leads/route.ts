@@ -1,12 +1,20 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { createClient } from "@/lib/supabase/server";
+import { leadAccessWhere } from "@/lib/api-auth";
 import { priorityForStage, type LeadPriority } from "@/lib/lead-ui";
 import { formatMonthlyRevenue, parseYesNo } from "@/lib/lead-custom-fields";
 import { ensureStandardCustomFields } from "@/lib/standard-custom-fields";
 import { CLOSED_LOST_OUTCOME } from "@/lib/lost-reasons";
+import { Prisma } from "../../../generated/prisma/client";
 
 const priorityValues = new Set(["hot", "warm", "cold"]);
+const listSortFields = {
+  company: "company",
+  followUpDate: "followUpDate",
+  createdAt: "createdAt",
+  stageChangedAt: "stageChangedAt",
+} as const;
 
 function text(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -17,9 +25,33 @@ async function getProfile() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
   return prisma.user.findFirst({
-    where: { OR: [{ id: user.id }, { email: user.email ?? "" }], isActive: true },
+    where: { id: user.id, isActive: true },
   });
 }
+
+const leadListSelect = {
+  id: true,
+  company: true,
+  niche: true,
+  contact: true,
+  phone: true,
+  priority: true,
+  followUpDate: true,
+  followUpTime: true,
+  createdAt: true,
+  stageChangedAt: true,
+  stage: { select: { name: true } },
+  assignee: { select: { name: true } },
+  source: { select: { name: true } },
+  _count: { select: { activities: { where: { outcome: { not: CLOSED_LOST_OUTCOME } } } } },
+  activities: {
+    orderBy: { createdAt: "desc" as const },
+    take: 1,
+    select: { outcome: true, notes: true },
+  },
+} satisfies Prisma.LeadSelect;
+
+type LeadListRow = Prisma.LeadGetPayload<{ select: typeof leadListSelect }>;
 
 function serializeLead(lead: {
   id: string;
@@ -62,29 +94,69 @@ export async function GET(request: Request) {
   const profile = await getProfile();
   if (!profile) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const query = text(new URL(request.url).searchParams.get("q"));
-  const leads = await prisma.lead.findMany({
-    where: query
-      ? {
-          OR: [
-            { company: { contains: query, mode: "insensitive" } },
-            { contact: { contains: query, mode: "insensitive" } },
-            { phone: { contains: query } },
-            { niche: { contains: query, mode: "insensitive" } },
-          ],
-        }
-      : undefined,
-    take: query ? 8 : undefined,
-    orderBy: { createdAt: "desc" },
-    include: {
-      stage: { select: { name: true } },
-      assignee: { select: { name: true } },
-      source: { select: { name: true } },
-      _count: { select: { activities: { where: { outcome: { not: CLOSED_LOST_OUTCOME } } } } },
-      activities: { orderBy: { createdAt: "desc" }, take: 1, select: { outcome: true, notes: true } },
-    },
+  const searchParams = new URL(request.url).searchParams;
+  const query = text(searchParams.get("q"));
+  const followUpsOnly = searchParams.get("followups") === "1";
+  const page = Math.max(1, Number(searchParams.get("page") ?? "1") || 1);
+  const requestedPageSize = Number(searchParams.get("pageSize") ?? "25");
+  const pageSize = Math.min(100, Math.max(1, Number.isFinite(requestedPageSize) ? requestedPageSize : 25));
+  const paginated = searchParams.has("page") || searchParams.has("pageSize");
+  const stage = text(searchParams.get("stage"));
+  const assignee = text(searchParams.get("assignee"));
+  const niche = text(searchParams.get("niche"));
+  const priority = text(searchParams.get("priority"));
+  const dateRange = text(searchParams.get("dateRange"));
+  const sort = text(searchParams.get("sort")) as keyof typeof listSortFields;
+  const direction = searchParams.get("direction") === "desc" ? "desc" : "asc";
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const dateFilter = dateRange === "Overdue"
+    ? { followUpDate: { lt: today } }
+    : dateRange === "Today"
+      ? { followUpDate: { gte: today, lt: new Date(today.getTime() + 24 * 60 * 60 * 1000) } }
+      : dateRange === "Next 7 days"
+        ? { followUpDate: { gte: today, lt: new Date(today.getTime() + 8 * 24 * 60 * 60 * 1000) } }
+        : {};
+  const stageFilter = stage
+    ? { name: stage }
+    : followUpsOnly
+      ? { name: { notIn: ["Closed Won", "Closed Lost", "Dead Lead"] } }
+      : undefined;
+  const where = {
+    ...leadAccessWhere(profile),
+    ...(followUpsOnly
+      ? { followUpDate: { not: null } }
+      : {}),
+    ...(stageFilter ? { stage: stageFilter } : {}),
+    ...(assignee ? { assignee: { name: assignee } } : {}),
+    ...(niche ? { niche } : {}),
+    ...(priority && priorityValues.has(priority) ? { priority: priority as "hot" | "warm" | "cold" } : {}),
+    ...dateFilter,
+    ...(query ? {
+      OR: [
+        { company: { contains: query, mode: "insensitive" as const } },
+        { contact: { contains: query, mode: "insensitive" as const } },
+        { phone: { contains: query } },
+        { niche: { contains: query, mode: "insensitive" as const } },
+      ],
+    } : {}),
+  };
+  const orderBy = sort && listSortFields[sort]
+    ? { [listSortFields[sort]]: direction } as const
+    : { createdAt: "desc" as const };
+  const [leads, total] = await Promise.all([
+    prisma.lead.findMany({
+      where,
+      ...(paginated ? { skip: (page - 1) * pageSize, take: pageSize } : query ? { take: 8 } : {}),
+      orderBy,
+      select: leadListSelect,
+    }),
+    paginated ? prisma.lead.count({ where }) : Promise.resolve(0),
+  ]);
+  return NextResponse.json({
+    leads: (leads as LeadListRow[]).map(serializeLead),
+    ...(paginated ? { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) } : {}),
   });
-  return NextResponse.json({ leads: leads.map(serializeLead) });
 }
 
 export async function POST(request: Request) {
@@ -104,7 +176,7 @@ export async function POST(request: Request) {
   const stage = await prisma.pipelineStage.findFirst({
     where: { name: text(body.stage) || "New Lead", isActive: true },
   });
-  const assignee = text(body.assigneeName)
+  const assignee = profile.role === "superadmin" && text(body.assigneeName)
     ? await prisma.user.findFirst({ where: { name: text(body.assigneeName), isActive: true } })
     : profile;
   if (!stage) return NextResponse.json({ error: "Selected stage was not found" }, { status: 400 });
@@ -119,7 +191,7 @@ export async function POST(request: Request) {
 
   const standardIds = await ensureStandardCustomFields();
   const monthlyRevenue = formatMonthlyRevenue({
-    currency: body.monthlyRevenue?.currency === "$" ? "$" : "Rs",
+    currency: body.monthlyRevenue?.currency === "$" ? "$" : "LKR",
     amount: text(body.monthlyRevenue?.amount),
   });
   const discoveryCall = parseYesNo(body.discoveryCall);
@@ -173,14 +245,20 @@ export async function PATCH(request: Request) {
     data.assigneeId = assignee.id;
   }
   const activities = await prisma.$transaction(async (tx) => {
+    const accessibleLeads = await tx.lead.findMany({
+      where: { id: { in: ids }, ...leadAccessWhere(profile) },
+      select: { id: true, stageId: true },
+    });
+    if (accessibleLeads.length !== ids.length) return null;
     const newlyLost = markingLost
-      ? await tx.lead.findMany({ where: { id: { in: ids }, stageId: { not: data.stageId } }, select: { id: true } })
+      ? accessibleLeads.filter((lead) => lead.stageId !== data.stageId)
       : [];
-    await tx.lead.updateMany({ where: { id: { in: ids } }, data });
+    await tx.lead.updateMany({ where: { id: { in: ids }, ...leadAccessWhere(profile) }, data });
     return Promise.all(newlyLost.map(({ id }) => tx.activity.create({
       data: { leadId: id, outcome: CLOSED_LOST_OUTCOME, notes: data.lostReason ?? undefined, loggedBy: profile.id },
     })));
   });
+  if (!activities) return NextResponse.json({ error: "One or more leads were not found" }, { status: 404 });
   return NextResponse.json({
     updated: ids.length,
     activities: activities.map((activity) => ({
@@ -202,6 +280,6 @@ export async function DELETE(request: Request) {
   const body = await request.json() as { ids?: string[] };
   const ids = Array.isArray(body.ids) ? body.ids.filter((id): id is string => typeof id === "string") : [];
   if (ids.length === 0) return NextResponse.json({ error: "At least one lead id is required" }, { status: 400 });
-  const result = await prisma.lead.deleteMany({ where: { id: { in: ids } } });
+  const result = await prisma.lead.deleteMany({ where: { id: { in: ids }, ...leadAccessWhere(profile) } });
   return NextResponse.json({ deleted: result.count });
 }

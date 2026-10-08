@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireProfile } from "@/lib/api-auth";
+import { leadAccessWhere, requireProfile } from "@/lib/api-auth";
 import { formatMonthlyRevenue, parseMonthlyRevenue, parseYesNo } from "@/lib/lead-custom-fields";
 import { ensureStandardCustomFields, standardFieldKey } from "@/lib/standard-custom-fields";
 
@@ -37,23 +37,29 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const { response } = await requireProfile(request);
-  if (response) return response;
+  const { profile, response } = await requireProfile(request);
+  if (response || !profile) return response ?? NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await params;
   const standardIds = await ensureStandardCustomFields();
   const [lead, fields] = await Promise.all([
-    prisma.lead.findUnique({
-      where: { id },
+    prisma.lead.findFirst({
+      where: { id, ...leadAccessWhere(profile) },
       include: {
         stage: { select: { name: true } },
         assignee: { select: { name: true } },
         source: { select: { name: true } },
         activities: {
           orderBy: { createdAt: "desc" },
-          include: { logger: { select: { name: true } } },
+          select: {
+            id: true,
+            outcome: true,
+            notes: true,
+            createdAt: true,
+            logger: { select: { name: true } },
+          },
         },
-        customFieldValues: true,
+        customFieldValues: { select: { customFieldId: true, value: true } },
       },
     }),
     prisma.customField.findMany({
@@ -222,7 +228,7 @@ export async function PATCH(
     return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
   }
 
-  const existing = await prisma.lead.findUnique({ where: { id }, select: { id: true } });
+  const existing = await prisma.lead.findFirst({ where: { id, ...leadAccessWhere(profile) }, select: { id: true } });
   if (!existing) return NextResponse.json({ error: "Lead not found" }, { status: 404 });
 
   const standardIds = await ensureStandardCustomFields();

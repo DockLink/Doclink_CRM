@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode, type CSSProperties, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode, type CSSProperties, type KeyboardEvent } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { PAGE_ROUTES, pageTitleForPath, pathnameToPage, type UserRole } from "@/lib/types";
 import { useDisplayName, useRole } from "@/lib/role-context";
 import { clearAllDrafts } from "@/lib/use-form-draft";
+import { onCrmDataChanged } from "@/lib/crm-invalidation";
 
 export type { UserRole };
 
@@ -83,6 +84,21 @@ function ChevronDownIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ color: "#6B7280" }}>
       <polyline points="6 9 12 15 18 9" />
+    </svg>
+  );
+}
+
+type NotificationSummary = {
+  today: number;
+  missed: number;
+  upcoming: number;
+};
+
+function NotificationSummaryIcon({ color }: { color: string }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M6 3v18" />
+      <path d="M6 5h11l-2 4 2 4H6" />
     </svg>
   );
 }
@@ -418,6 +434,58 @@ function HeaderSearch() {
 function TopBar({ pageTitle, name, onSignOut }: { pageTitle: string; name: string; onSignOut: () => void }) {
   const [notifOpen, setNotifOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
+  const [notificationSummary, setNotificationSummary] = useState<NotificationSummary | null>(null);
+  const [notificationError, setNotificationError] = useState("");
+  const router = useRouter();
+
+  const loadNotificationSummary = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/followups/summary?tzOffset=${new Date().getTimezoneOffset()}`);
+      const result = await response.json() as {
+        today?: number;
+        missed?: number;
+        upcoming?: number;
+        error?: string;
+      };
+      if (!response.ok) throw new Error(result.error ?? "Unable to load follow-up notifications.");
+      setNotificationSummary({
+        today: result.today ?? 0,
+        missed: result.missed ?? 0,
+        upcoming: result.upcoming ?? 0,
+      });
+      setNotificationError("");
+    } catch (error) {
+      console.error("Unable to load follow-up notification summary.", error);
+      setNotificationError("Unable to load follow-up counts.");
+    }
+  }, []);
+
+  useEffect(() => {
+    const initialLoad = window.setTimeout(() => {
+      void loadNotificationSummary();
+    }, 0);
+    const timer = window.setInterval(() => {
+      void loadNotificationSummary();
+    }, 60_000);
+    return () => {
+      window.clearTimeout(initialLoad);
+      window.clearInterval(timer);
+    };
+  }, [loadNotificationSummary]);
+
+  useEffect(() => onCrmDataChanged(
+    ["leads", "followups", "notifications"],
+    () => void loadNotificationSummary(),
+  ), [loadNotificationSummary]);
+
+  const openFollowUps = (section: "today" | "missed" | "upcoming") => {
+    setNotifOpen(false);
+    router.push(`/followups#${section}`);
+  };
+
+  const totalNotifications = (notificationSummary?.today ?? 0) +
+    (notificationSummary?.missed ?? 0) +
+    (notificationSummary?.upcoming ?? 0);
 
   return (
     <header
@@ -442,32 +510,60 @@ function TopBar({ pageTitle, name, onSignOut }: { pageTitle: string; name: strin
             aria-label="Notifications"
           >
             <BellIcon />
-            <span
-              className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full"
-              style={{ background: "#DC2626", border: "1.5px solid white" }}
-            />
+            {notificationSummary && notificationSummary.missed > 0 && (
+              <span
+                className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full"
+                style={{ background: "#DC2626", border: "1.5px solid white" }}
+                aria-label={`${notificationSummary.missed} missed follow-ups`}
+              />
+            )}
           </button>
           {notifOpen && (
             <div
               className="absolute right-0 mt-1 rounded-xl shadow-lg border py-2"
-              style={{ top: "100%", width: 300, background: "white", borderColor: "#E5E7EB", zIndex: 50 }}
+              style={{ top: "100%", width: 320, background: "white", borderColor: "#E5E7EB", zIndex: 50 }}
             >
-              <div className="px-4 py-2" style={{ borderBottom: "1px solid #E5E7EB" }}>
-                <span style={{ fontSize: 13, fontWeight: 600, color: "#111111" }}>Notifications</span>
-              </div>
-              {[
-                { text: "3 follow-ups missed today", time: "2h ago", dot: "#DC2626" },
-                { text: "Meridian Corp moved to Proposal Sent", time: "4h ago", dot: "#6366F1" },
-                { text: "Weekly pipeline report ready", time: "Yesterday", dot: "#2FBEB3" },
-              ].map(({ text, time, dot }) => (
-                <div key={text} className="flex items-start gap-3 px-4 py-2.5 hover:bg-[#F9FAFB] transition-colors" style={{ cursor: "pointer" }}>
-                  <div className="w-2 h-2 rounded-full mt-1.5 shrink-0" style={{ background: dot }} />
-                  <div>
-                    <div style={{ fontSize: 13, color: "#111111" }}>{text}</div>
-                    <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>{time}</div>
-                  </div>
+              <div className="flex items-center justify-between px-4 py-2.5" style={{ borderBottom: "1px solid #E5E7EB" }}>
+                <div>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: "#111111" }}>Follow-up notifications</span>
+                  <p style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>Your current follow-up workload</p>
                 </div>
-              ))}
+                {notificationSummary && (
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "#0E7A70", background: "#E3F7F5", borderRadius: 999, padding: "3px 8px" }}>
+                    {totalNotifications} total
+                  </span>
+                )}
+              </div>
+              {notificationError ? (
+                <div className="px-4 py-4" style={{ fontSize: 12, color: "#DC2626" }}>{notificationError}</div>
+              ) : (
+                <div className="py-1">
+                  {[
+                    { key: "today" as const, label: "Today's follow-ups", description: "Scheduled for today", color: "#2FBEB3" },
+                    { key: "missed" as const, label: "Missed follow-ups", description: "Need your attention", color: "#DC2626" },
+                    { key: "upcoming" as const, label: "Upcoming follow-ups", description: "Scheduled in the next 7 days", color: "#6366F1" },
+                  ].map(({ key, label, description, color }) => (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => openFollowUps(key)}
+                      className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-[#F9FAFB] transition-colors"
+                      style={{ background: "transparent", border: "none", cursor: "pointer" }}
+                    >
+                      <span className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: `${color}16` }}>
+                        <NotificationSummaryIcon color={color} />
+                      </span>
+                      <span className="flex-1 min-w-0">
+                        <span className="block" style={{ fontSize: 13, fontWeight: 500, color: "#111111" }}>{label}</span>
+                        <span className="block" style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>{description}</span>
+                      </span>
+                      <span style={{ minWidth: 28, textAlign: "center", fontSize: 13, fontWeight: 700, color, background: `${color}16`, borderRadius: 999, padding: "4px 7px" }}>
+                        {notificationSummary?.[key] ?? "—"}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>

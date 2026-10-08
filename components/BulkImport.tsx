@@ -5,6 +5,7 @@ import * as XLSX from "xlsx";
 import type { UserRole } from "@/lib/types";
 import { REVENUE_CURRENCIES, type RevenueCurrency } from "@/lib/lead-custom-fields";
 import { isSensitiveField, readDraft, useFormDraft } from "@/lib/use-form-draft";
+import { notifyCrmDataChanged } from "@/lib/crm-invalidation";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -567,7 +568,7 @@ function Step2({ rows, mappings: currentMappings, onMappingsChange: setMappings,
               onChange={(value) => onRevenueCurrencyChange(value as RevenueCurrency)}
             />
           </div>
-          <span style={{ fontSize: 12, color: "#6B7280" }}>Used when a cell has no ₹/Rs or $ symbol.</span>
+          <span style={{ fontSize: 12, color: "#6B7280" }}>Used when a cell has no LKR or $ symbol.</span>
         </div>
       )}
 
@@ -650,6 +651,7 @@ function Step3({ rows, mappings, assigneeName, revenueCurrency, dupAction, onDup
         setError(result.error ?? `Unable to import leads (server responded ${response.status}).`);
         return;
       }
+      notifyCrmDataChanged("leads", "followups", "dashboard", "notifications");
       const failedRows = result.failedRows ?? [];
       onNext({ imported: result.imported ?? 0, skipped: result.skipped ?? 0, failed: failedRows.length, failedRows });
     } catch {
@@ -834,7 +836,7 @@ export function BulkImport({ initialStep = 1, onNavigate }: BulkImportProps) {
   const [rows, setRows] = useState<ImportRow[]>(restored?.rows ?? []);
   const [mappings, setMappings] = useState<ColumnMapping[]>(restored?.mappings ?? []);
   const [assigneeName, setAssigneeName] = useState(restored?.assigneeName ?? "");
-  const [revenueCurrency, setRevenueCurrency] = useState<RevenueCurrency>(restored?.revenueCurrency ?? "Rs");
+  const [revenueCurrency, setRevenueCurrency] = useState<RevenueCurrency>(restored?.revenueCurrency ?? "LKR");
   const [dupAction, setDupAction] = useState<DuplicateAction>(restored?.duplicateAction ?? "skip");
   const [result, setResult] = useState<ImportResult>({ imported: 0, skipped: 0, failed: 0, failedRows: [] });
 

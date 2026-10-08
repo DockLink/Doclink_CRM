@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { CLOSED_LOST_OUTCOME, lostReasonCategory } from "@/lib/lost-reasons";
-import { requireProfile, checkRateLimit } from "@/lib/api-auth"; // adjust import path to wherever requireProfile/checkRateLimit actually live
+import { leadAccessWhere, requireProfile, checkRateLimit } from "@/lib/api-auth";
 import { Prisma } from "../../../generated/prisma/client"; // adjust relative depth if this file moves
 
 // ─── Stage name constants ──────────────────────────────────────────────────
@@ -79,12 +79,15 @@ export async function GET(request: Request) {
   if (response) return response;
 
   const isSuperadmin = profile.role === "superadmin";
+  const canViewCompanyData = profile.role === "superadmin" || profile.role === "admin";
 
   const now = new Date();
   const today = startOfDay(now);
   const in7Days = new Date(today.getTime() + 7 * DAY_MS);
   const fourteenDaysAgo = new Date(now.getTime() - 14 * DAY_MS);
   const sevenDaysAgo = new Date(now.getTime() - 7 * DAY_MS);
+  const leadScopeSql = canViewCompanyData ? Prisma.empty : Prisma.sql`WHERE assignee_id = ${profile.id}`;
+  const activityScopeSql = canViewCompanyData ? Prisma.empty : Prisma.sql`AND logged_by = ${profile.id}`;
 
   // ─── Scope: admin and superadmin both see company-wide data ──────────────
   // Every query below is independent, so they all run in a single parallel
@@ -108,12 +111,14 @@ export async function GET(request: Request) {
         COUNT(*) FILTER (WHERE stage_changed_at IS NULL OR stage_changed_at < ${sqlTimestamp(sevenDaysAgo)})::int AS "noStatusUpdate",
         COUNT(*) FILTER (WHERE last_activity_at >= ${sqlTimestamp(today)})::int AS "updatedToday"
       FROM leads
+      ${leadScopeSql}
       GROUP BY stage_id, assignee_id
     `,
     // Only open leads that can land in missed/today/upcoming. The DB bound is
     // deliberately loose (follow_up_date is a DATE); exact bucketing happens below.
     prisma.lead.findMany({
       where: {
+        ...leadAccessWhere(profile),
         followUpDate: { lte: new Date(in7Days.getTime() + 2 * DAY_MS) },
         stage: { name: { notIn: CLOSED_STAGE_NAMES } },
       },
@@ -131,13 +136,14 @@ export async function GET(request: Request) {
           FROM activities
           WHERE created_at >= ${sqlTimestamp(sevenDaysAgo)}
             AND outcome <> ${CLOSED_LOST_OUTCOME}
+            ${activityScopeSql}
           GROUP BY logged_by
         `
       : null,
     isSuperadmin
       ? prisma.lead.groupBy({
           by: ["lostReason"],
-          where: { stage: { name: CLOSED_LOST } },
+          where: { stage: { name: CLOSED_LOST }, ...leadAccessWhere(profile) },
           _count: { _all: true },
         })
       : null,

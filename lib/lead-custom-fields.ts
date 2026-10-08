@@ -1,7 +1,7 @@
 export const MONTHLY_REVENUE_LABEL = "Monthly Revenue";
 export const DISCOVERY_CALL_LABEL = "Discovery Call";
 
-export const REVENUE_CURRENCIES = ["Rs", "$"] as const;
+export const REVENUE_CURRENCIES = ["LKR", "$"] as const;
 export type RevenueCurrency = (typeof REVENUE_CURRENCIES)[number];
 
 export const YES_NO_OPTIONS = ["Yes", "No"] as const;
@@ -14,21 +14,21 @@ export interface MonthlyRevenue {
   amount: string;
 }
 
-// Stored as "<currency> <amount>", e.g. "Rs 50000" or "$ 1200".
+// Stored as "<currency> <amount>", e.g. "LKR 50000" or "$ 1200".
 export function formatMonthlyRevenue({ currency, amount }: MonthlyRevenue) {
   const clean = amount.replace(/[^0-9.]/g, "");
   return clean ? `${currency} ${clean}` : "";
 }
 
-export function parseMonthlyRevenue(value: string, fallback: RevenueCurrency = "Rs"): MonthlyRevenue {
+export function parseMonthlyRevenue(value: string, fallback: RevenueCurrency = "LKR"): MonthlyRevenue {
   const raw = value.trim();
   const lower = raw.toLowerCase();
   const currency: RevenueCurrency = raw.includes("$") || /\busd\b/.test(lower)
     ? "$"
-    : raw.includes("₹") || /\b(rs|inr)\b/.test(lower)
-      ? "Rs"
+    : raw.includes("₹") || /\b(rs|inr|lkr)\b/.test(lower)
+      ? "LKR"
       : fallback;
-  const amount = raw.replace(/rs\.?|inr|usd/gi, "").replace(/[^0-9.]/g, "");
+  const amount = raw.replace(/rs\.?|inr|lkr|usd/gi, "").replace(/[^0-9.]/g, "");
   return { currency, amount };
 }
 

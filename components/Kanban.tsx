@@ -8,6 +8,7 @@ import { LostReasonModal, type LostReason } from "@/components/LostReasonModal";
 import { assigneeColor, displayDate, initials, priorityForStage, type ApiLead, urgencyFor } from "@/lib/lead-ui";
 import { activeStages, stageColor, type PipelineStage } from "@/lib/pipeline-stages";
 import { usePipelineStages } from "@/lib/use-pipeline-stages";
+import { notifyCrmDataChanged } from "@/lib/crm-invalidation";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -188,10 +189,12 @@ function StageSelector({
   currentStage,
   stages,
   onSelect,
+  openDownward,
 }: {
   currentStage: string;
   stages: PipelineStage[];
   onSelect: (stage: string) => void;
+  openDownward: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -240,7 +243,9 @@ function StageSelector({
         <div
           className="absolute rounded-lg shadow-xl"
           style={{
-            bottom: "calc(100% + 4px)",
+            ...(openDownward
+              ? { top: "calc(100% + 4px)" }
+              : { bottom: "calc(100% + 4px)" }),
             left: 0,
             width: 192,
             background: "#FFFFFF",
@@ -292,11 +297,13 @@ function LeadCard({
   lead,
   stages,
   isPlaceholder = false,
+  openStageMenuDownward = false,
   onStageChange,
 }: {
   lead: Lead;
   stages: PipelineStage[];
   isPlaceholder?: boolean;
+  openStageMenuDownward?: boolean;
   onStageChange: (leadId: string, newStage: string) => void;
 }) {
   const router = useRouter();
@@ -381,6 +388,7 @@ function LeadCard({
         <StageSelector
           currentStage={lead.stage}
           stages={stages}
+          openDownward={openStageMenuDownward}
           onSelect={(newStage) => onStageChange(lead.id, newStage)}
         />
 
@@ -456,8 +464,14 @@ function KanbanColumn({
         className="flex flex-col gap-2 flex-1 rounded-lg p-2"
         style={{ background: "#F8FAFB", border: "2px solid transparent", minHeight: 120 }}
       >
-        {leads.map((lead) => (
-          <LeadCard key={lead.id} lead={lead} stages={stages} onStageChange={onStageChange} />
+        {leads.map((lead, index) => (
+          <LeadCard
+            key={lead.id}
+            lead={lead}
+            stages={stages}
+            openStageMenuDownward={index < leads.length - 2}
+            onStageChange={onStageChange}
+          />
         ))}
       </div>
     </div>
@@ -576,6 +590,7 @@ export function Kanban({ role }: { role: UserRole }) {
       return;
     }
     setError("");
+    notifyCrmDataChanged("leads", "followups", "dashboard", "notifications");
     setLeads((prev) =>
       prev.map((l) =>
         l.id === leadId

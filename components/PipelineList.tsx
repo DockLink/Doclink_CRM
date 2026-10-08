@@ -7,6 +7,7 @@ import type { UserRole } from "@/lib/types";
 import { assigneeColor, displayDate, displayTime, initials, type ApiLead, urgencyFor } from "@/lib/lead-ui";
 import { activeStages, stageColor, type PipelineStage } from "@/lib/pipeline-stages";
 import { usePipelineStages } from "@/lib/use-pipeline-stages";
+import { notifyCrmDataChanged } from "@/lib/crm-invalidation";
 
 // ─── Palette ──────────────────────────────────────────────────────────────────
 
@@ -472,14 +473,25 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
   const [search, setSearch]     = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set(forceBulk ? ["2","3","9"] : []));
   const [page, setPage]         = useState(1);
+  const [total, setTotal]       = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
   const [sortKey, setSortKey]   = useState<SortKey>("followUpDate");
   const [sortDir, setSortDir]   = useState<"up" | "down">("up");
 
   useEffect(() => {
+    const timer = window.setTimeout(() => {
     const loadLeads = async () => {
       try {
-        const response = await fetch("/api/leads");
-        const result = await response.json() as { leads?: ApiLead[]; error?: string };
+        const params = new URLSearchParams({
+          page: String(page),
+          pageSize: String(PAGE_SIZE),
+          direction: sortDir === "down" ? "desc" : "asc",
+        });
+        if (sortKey === "company" || sortKey === "followUpDate") params.set("sort", sortKey);
+        Object.entries(filters).forEach(([key, value]) => { if (value) params.set(key, value); });
+        if (search.trim()) params.set("q", search.trim());
+        const response = await fetch(`/api/leads?${params.toString()}`);
+        const result = await response.json() as { leads?: ApiLead[]; error?: string; total?: number; totalPages?: number };
         if (!response.ok) {
           setError(result.error ?? "Unable to load leads.");
           return;
@@ -505,6 +517,8 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
             urgency: urgencyFor(lead.followUpDate, lead.followUpTime),
           };
         }));
+        setTotal(result.total ?? result.leads?.length ?? 0);
+        setTotalPages(result.totalPages ?? 1);
       } catch {
         setError("Unable to reach the server. Please refresh and try again.");
       } finally {
@@ -512,7 +526,9 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
       }
     };
     void loadLeads();
-  }, []);
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [filters, page, search, sortDir, sortKey]);
 
   useEffect(() => {
     const loadAssignees = async () => {
@@ -520,6 +536,7 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
         const response = await fetch("/api/users");
         const result = await response.json() as { users?: Array<AssignableUser & { status: string }> };
         if (!response.ok) return;
+        notifyCrmDataChanged("leads", "followups", "dashboard", "notifications");
         setAssignees((result.users ?? []).filter((user) => user.status === "active"));
       } catch {
         setAssignees([]);
@@ -528,8 +545,10 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
     void loadAssignees();
   }, []);
 
-  const setFilter = (key: string, val: string | null) =>
+  const setFilter = (key: string, val: string | null) => {
+    setPage(1);
     setFiltersState((prev) => ({ ...prev, [key]: val }));
+  };
 
   // Filter + search
   const visible = leads.filter((l) => {
@@ -558,8 +577,7 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
     return sortDir === "up" ? cmp : -cmp;
   });
 
-  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
-  const paged = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const paged = sorted;
 
   const allPageSelected = paged.length > 0 && paged.every((l) => selected.has(l.id));
 
@@ -577,6 +595,7 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
   };
 
   const handleSort = (key: SortKey) => {
+    setPage(1);
     if (sortKey === key) setSortDir((d) => d === "up" ? "down" : "up");
     else { setSortKey(key); setSortDir("up"); }
   };
@@ -591,6 +610,7 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
       body: JSON.stringify({ ids: [...selected], assigneeName: assignee.name }),
     });
     if (!response.ok) return;
+    notifyCrmDataChanged("leads", "followups", "dashboard", "notifications");
     setLeads((prev) => prev.map((lead) => selected.has(lead.id)
       ? { ...lead, assigneeName: assignee.name, assigneeInitials: assignee.initials, assigneeColor: assignee.color }
       : lead));
@@ -843,7 +863,7 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
             style={{ height: 52, borderTop: "1px solid #E5E7EB", background: "#FAFAFA" }}
           >
             <span style={{ fontSize: 12, color: "#9CA3AF" }}>
-              Showing {Math.min((page - 1) * PAGE_SIZE + 1, sorted.length)}–{Math.min(page * PAGE_SIZE, sorted.length)} of {sorted.length} leads
+              Showing {total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, total)} of {total} leads
             </span>
             <div className="flex items-center gap-2">
   {/* Previous */}

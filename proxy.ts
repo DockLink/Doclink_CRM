@@ -6,14 +6,12 @@ const publicPaths = ["/login", "/forgot-password", "/reset-password"];
 
 async function getRole(
   supabase: ReturnType<typeof createServerClient>,
-  user: { email?: string; app_metadata?: Record<string, unknown> },
+  user: { id: string },
 ): Promise<UserRole | null> {
-  if (!user.email) return null;
-
   const { data: profile, error } = await supabase
     .from("users")
     .select("role,is_active")
-    .eq("email", user.email)
+    .eq("id", user.id)
     .maybeSingle();
 
   if (!error && profile) {
@@ -21,8 +19,7 @@ async function getRole(
     return profile.role === "superadmin" || profile.role === "admin" ? profile.role : null;
   }
 
-  const metadataRole = user.app_metadata?.role;
-  return metadataRole === "superadmin" || metadataRole === "admin" ? metadataRole : null;
+  return null;
 }
 
 export async function proxy(request: NextRequest) {

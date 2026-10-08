@@ -8,6 +8,7 @@ import { stageColor } from "@/lib/pipeline-stages";
 import { usePipelineStages } from "@/lib/use-pipeline-stages";
 import { clearDraft, readDraft, useFormDraft } from "@/lib/use-form-draft";
 import { LogCallModal, type LogCallForm } from "@/components/LogCallModal";
+import { notifyCrmDataChanged } from "@/lib/crm-invalidation";
 
 const rescheduleDraftKey = (leadId: string) => `lead:${leadId}:reschedule`;
 
@@ -495,7 +496,7 @@ export function FollowUps({ role }: { role: UserRole }) {
   useEffect(() => {
     const load = async () => {
       try {
-        const response = await fetch("/api/leads");
+        const response = await fetch("/api/leads?followups=1");
         const result = await response.json() as { leads?: ApiLead[]; error?: string };
         if (!response.ok) {
           setError(result.error ?? "Unable to load follow-ups.");
@@ -540,6 +541,7 @@ export function FollowUps({ role }: { role: UserRole }) {
       const result = await response.json().catch(() => ({})) as { error?: string };
       throw new Error(result.error ?? "Unable to update the follow-up.");
     }
+    notifyCrmDataChanged("leads", "followups", "dashboard", "notifications");
   };
 
   const applySchedule = (leadId: string, date: string, time: string) => {
@@ -577,6 +579,7 @@ export function FollowUps({ role }: { role: UserRole }) {
     if (!response.ok) throw new Error(result.error ?? "Unable to save the call log.");
     if (completeFollowUp) {
       setItems((prev) => prev.filter((item) => item.id !== callLead.id));
+      notifyCrmDataChanged("leads", "followups", "dashboard", "notifications");
       setError("");
       return;
     }
@@ -586,6 +589,7 @@ export function FollowUps({ role }: { role: UserRole }) {
     if (data.followUpDate && data.followUpTime) {
       applySchedule(callLead.id, data.followUpDate, data.followUpTime);
     }
+    notifyCrmDataChanged("leads", "followups", "dashboard", "notifications");
     setError("");
   };
 

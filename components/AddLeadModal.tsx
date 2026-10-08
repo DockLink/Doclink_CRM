@@ -7,6 +7,7 @@ import { usePipelineStages } from "@/lib/use-pipeline-stages";
 import { priorityForStage } from "@/lib/lead-ui";
 import { REVENUE_CURRENCIES, YES_NO_OPTIONS, type RevenueCurrency, type YesNo } from "@/lib/lead-custom-fields";
 import { readDraft, useFormDraft } from "@/lib/use-form-draft";
+import { notifyCrmDataChanged } from "@/lib/crm-invalidation";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -63,7 +64,7 @@ const EMPTY_FORM: LeadForm = {
   priority: null,
   assignee: "",
   stage: "",
-  revenueCurrency: "Rs",
+  revenueCurrency: "LKR",
   revenueAmount: "",
   discoveryCall: "",
   proposalSent: false,
@@ -422,6 +423,7 @@ export function AddLeadModal({ mode = "add", role, showValidation = false, onClo
         setSaveError(result.error ?? "Unable to save lead.");
         return;
       }
+      notifyCrmDataChanged("leads", "followups", "dashboard", "notifications");
       clearDraft();
       onClose?.();
     } catch {
@@ -649,7 +651,7 @@ export function AddLeadModal({ mode = "add", role, showValidation = false, onClo
                 <TextInput
                   value={form.revenueAmount}
                   onChange={(v) => set("revenueAmount", v.replace(/[^0-9.]/g, ""))}
-                  placeholder={form.revenueCurrency === "Rs" ? "e.g. 50000" : "e.g. 1200"}
+                  placeholder={form.revenueCurrency === "LKR" ? "e.g. 50000" : "e.g. 1200"}
                 />
               </div>
             </div>

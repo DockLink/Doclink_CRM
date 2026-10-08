@@ -14,6 +14,9 @@ function createPrismaClient() {
   return new PrismaClient({
     adapter: new PrismaPg({
       connectionString,
+      // Supabase's pooler currently presents a self-signed chain in this
+      // environment. Certificate verification requires configuring its CA via
+      // the deployment environment before enabling rejectUnauthorized.
       ssl: { rejectUnauthorized: false },
       // Opening a TLS connection to the remote pooler costs 1-2s, so keep idle
       // connections around instead of pg's 10s default.
