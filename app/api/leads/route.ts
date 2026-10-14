@@ -141,9 +141,11 @@ export async function GET(request: Request) {
       ],
     } : {}),
   };
+  // Keep the order deterministic when multiple leads share the same sort
+  // value. Stage changes must not move a lead because of database tie ordering.
   const orderBy = sort && listSortFields[sort]
-    ? { [listSortFields[sort]]: direction } as const
-    : { createdAt: "desc" as const };
+    ? [{ [listSortFields[sort]]: direction }, { id: "asc" as const }]
+    : [{ createdAt: "desc" as const }, { id: "asc" as const }];
   const [leads, total] = await Promise.all([
     prisma.lead.findMany({
       where,

@@ -680,16 +680,16 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
                   ) : null}
                 </TH>
                 <TH center>PRI</TH>
-                <TH center sortable sortDir={sortKey === "company" ? sortDir : null} onClick={() => handleSort("company")}>Company</TH>
+                <TH center>Company</TH>
                 <TH center>Niche</TH>
                 <TH center>Source</TH>
                 <TH center>Contact</TH>
                 <TH center>Phone</TH>
-                <TH center sortable sortDir={sortKey === "stage" ? sortDir : null} onClick={() => handleSort("stage")}>Stage</TH>
-                <TH center sortable sortDir={sortKey === "followUpDate" ? sortDir : null} onClick={() => handleSort("followUpDate")}>Follow-up Date</TH>
+                <TH center >Stage</TH>
+                <TH center >Follow-up Date</TH>
                 <TH center>Time</TH>
-                <TH center sortable sortDir={sortKey === "daysInStage" ? sortDir : null} onClick={() => handleSort("daysInStage")} >Days in Stage</TH>
-                <TH center sortable sortDir={sortKey === "calls" ? sortDir : null} onClick={() => handleSort("calls")} >Calls</TH>
+                <TH center  >Days in Stage</TH>
+                <TH center >Calls</TH>
                 <TH center>Assignee</TH>
               </tr>
             </thead>
