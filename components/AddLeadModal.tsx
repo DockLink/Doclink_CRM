@@ -335,7 +335,7 @@ interface AddLeadModalProps {
   mode?: "add" | "edit";
   role: UserRole;
   showValidation?: boolean;
-  onClose?: () => void;
+  onClose?: (created?: boolean) => void;
 }
 
 export function AddLeadModal({ mode = "add", role, showValidation = false, onClose }: AddLeadModalProps) {
@@ -425,7 +425,7 @@ export function AddLeadModal({ mode = "add", role, showValidation = false, onClo
       }
       notifyCrmDataChanged("leads", "followups", "dashboard", "notifications");
       clearDraft();
-      onClose?.();
+      onClose?.(true);
     } catch {
       setSaveError("Unable to reach the server. Please try again.");
     } finally {
@@ -445,7 +445,7 @@ export function AddLeadModal({ mode = "add", role, showValidation = false, onClo
     <div
       className="fixed inset-0 z-50 flex items-center justify-center"
       style={{ background: "rgba(15,27,60,0.45)" }}
-      onClick={onClose}
+      onClick={() => onClose?.()}
     >
       <div
         className="flex flex-col"
@@ -462,7 +462,7 @@ export function AddLeadModal({ mode = "add", role, showValidation = false, onClo
           </h3>
           {onClose && (
             <button
-              onClick={onClose}
+              onClick={() => onClose?.()}
               className="flex items-center justify-center rounded-lg"
               style={{ width: 30, height: 30, background: "#F3F4F6", color: "#6B7280" }}
               onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#E5E7EB"; }}

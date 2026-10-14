@@ -1296,7 +1296,7 @@ interface LeadDetailPanelProps {
   leadId: string;
   initialTab?: Tab;
   onClose?: () => void;
-  onDelete?: (leadId: string, reason: string) => void;
+  onDelete?: (leadId: string, reason: string) => Promise<void>;
 }
 
 export function LeadDetailPanel({ role, leadId, initialTab = "details", onClose, onDelete }: LeadDetailPanelProps) {
@@ -1429,13 +1429,16 @@ export function LeadDetailPanel({ role, leadId, initialTab = "details", onClose,
     setPendingReassign(false);
   };
 
-  const handleDelete = (reason: string) => {
-    onDelete?.(lead.id, reason);
-    setPendingDelete(false);
-    onClose?.();
-  };
-
   const nextStage = nextStageName(stages, lead.stage);
+  const handleDelete = async (reason: string) => {
+    try {
+      await onDelete?.(lead.id, reason);
+      setPendingDelete(false);
+      onClose?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to delete lead.");
+    }
+  };
 
   return (
     <>
@@ -1552,7 +1555,6 @@ export function LeadDetailPanel({ role, leadId, initialTab = "details", onClose,
           onConfirm={handleReassign}
         />
       )}
-
       {pendingDelete && (
         <DeleteLeadModal
           companyName={lead.company}
@@ -1560,6 +1562,7 @@ export function LeadDetailPanel({ role, leadId, initialTab = "details", onClose,
           onConfirm={handleDelete}
         />
       )}
+
     </>
   );
 }

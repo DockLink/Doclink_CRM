@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { PAGE_ROUTES, type UserRole } from "@/lib/types";
 import { urgencyFor } from "@/lib/lead-ui";
 import { stageColor } from "@/lib/pipeline-stages";
@@ -91,7 +92,7 @@ function SectionLabel({ children }: { children: ReactNode }) {
   );
 }
 
-function ViewAllLink({ section }: { section: "today" | "missed" | "upcoming" }) {
+function ViewAllLink({ section }: { section: "today" | "missed" | "upcoming" | "meetings" }) {
   return (
     <Link href={`${PAGE_ROUTES.followups}#${section}`} style={{ fontSize: 12, color: "#2FBEB3", fontWeight: 500, textDecoration: "none" }}
       onMouseEnter={(e) => ((e.currentTarget as HTMLAnchorElement).style.color = "#0E7A70")}
@@ -189,7 +190,7 @@ function UpcomingFollowupsCard({ items }: { items: DashboardFollowUp[] }) {
     <Card style={{ padding: "16px 20px", flex: 1, minWidth: 0 }}>
       <div className="flex items-center justify-between mb-3">
         <h3 style={{ fontSize: 14, fontWeight: 600, color: "#111111" }}>
-          Upcoming <span style={{ fontWeight: 400, color: "#9CA3AF", fontSize: 12 }}>— next 7 days</span>
+          Upcoming Follow-ups <span style={{ fontWeight: 400, color: "#9CA3AF", fontSize: 12 }}>— next 7 days</span>
         </h3>
         <ViewAllLink section="upcoming" />
       </div>
@@ -216,6 +217,45 @@ function UpcomingFollowupsCard({ items }: { items: DashboardFollowUp[] }) {
           </div>
         ))}
       </div>
+    </Card>
+  );
+}
+
+function MeetingsCard({ items }: { items: DashboardFollowUp[] }) {
+  const router = useRouter();
+
+  return (
+    <Card style={{ padding: "16px 20px", flex: 1, minWidth: 0, borderLeft: "3px solid #F59E0B" }}>
+      <div className="flex items-center justify-between mb-3">
+        <h3 style={{ fontSize: 14, fontWeight: 600, color: "#B45309" }}>Upcoming Meetings</h3>
+        <ViewAllLink section="meetings" />
+      </div>
+      <div className="flex flex-col">
+        {items.length === 0 && <EmptyRow label="No follow-up meetings scheduled." />}
+        {items.slice(0, 5).map((item) => (
+          <div
+            key={item.id}
+            className="flex items-center gap-3 py-2.5 transition-colors"
+            style={{ borderTop: "1px solid #F3F4F6", cursor: "pointer" }}
+            onClick={() => router.push(`/leads/${item.id}`)}
+            onMouseEnter={(e) => ((e.currentTarget as HTMLDivElement).style.background = "#FFFBEB")}
+            onMouseLeave={(e) => ((e.currentTarget as HTMLDivElement).style.background = "transparent")}
+          >
+            <span
+              className="shrink-0 px-1.5 py-0.5 rounded"
+              style={{ fontSize: 11, fontWeight: 600, color: "#B45309", background: "#FEF3C7", minWidth: 44, textAlign: "center" }}
+            >
+              {fmtRelativeDay(item.followUpDate)}
+            </span>
+            <div className="flex-1 min-w-0">
+              <div style={{ fontSize: 13, fontWeight: 500, color: "#111111" }} className="truncate">{item.company}</div>
+              <div style={{ fontSize: 11, color: "#9CA3AF" }}>{fmtTime(item.followUpTime)} · {item.contact}</div>
+            </div>
+            <StagePill stage={item.stage} />
+          </div>
+        ))}
+      </div>
+      {items.length > 5 && <div className="mt-2" style={{ fontSize: 11, color: "#9CA3AF" }}>+{items.length - 5} more meetings</div>}
     </Card>
   );
 }
@@ -535,6 +575,7 @@ export function Dashboard({ role }: { role: UserRole }) {
           <TodayFollowupsCard items={todayFollowUps} />
           <MissedFollowupsCard items={missedFollowUps} />
           <UpcomingFollowupsCard items={data.followUps.upcoming} />
+          <MeetingsCard items={data.followUps.meetings} />
         </div>
       </div>
 

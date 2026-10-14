@@ -67,6 +67,11 @@ const followUpLeadSelect = {
   stageId: true,
   followUpDate: true,
   followUpTime: true,
+  activities: {
+    orderBy: { createdAt: "desc" as const },
+    take: 1,
+    select: { outcome: true },
+  },
 } satisfies Prisma.LeadSelect;
 
 type FollowUpLead = Prisma.LeadGetPayload<{ select: typeof followUpLeadSelect }>;
@@ -198,7 +203,12 @@ export async function GET(request: Request) {
   const todayKey = dateKey(wallClock);
   const horizonKey = dateKey(new Date(wallClock.getTime() + 7 * DAY_MS));
   const nowMinutes = timeMinutes(wallClock) as number;
+  const meetingFollowUps: FollowUpLead[] = [];
   for (const lead of followUpLeads) {
+    if (lead.activities[0]?.outcome === "meeting_set") {
+      meetingFollowUps.push(lead);
+      continue;
+    }
     const key = dateKey(lead.followUpDate as Date);
     if (key < todayKey) missedFollowUps.push(lead);
     else if (key === todayKey) {
@@ -215,6 +225,7 @@ export async function GET(request: Request) {
   missedFollowUps.sort(byDateThenTime);
   todayFollowUps.sort(byDateThenTime);
   upcomingFollowUps.sort(byDateThenTime);
+  meetingFollowUps.sort(byDateThenTime);
 
   // ─── Pipeline health ───────────────────────────────────────────────────
   const pipelineByStage = stages
@@ -301,6 +312,7 @@ export async function GET(request: Request) {
       today: todayFollowUps.map(serializeLeadForFollowUp),
       missed: missedFollowUps.map(serializeLeadForFollowUp),
       upcoming: upcomingFollowUps.map(serializeLeadForFollowUp),
+      meetings: meetingFollowUps.map(serializeLeadForFollowUp),
     },
     pipelineHealth: {
       totalLeads,
