@@ -313,10 +313,8 @@ function BulkActionBar({
       <button
         type="button"
         onClick={onDelete}
-        className="flex items-center gap-1.5 px-3 h-8 rounded-lg text-xs font-medium transition-colors"
+        className="flex items-center gap-1.5 px-3 h-8 rounded-lg text-xs font-medium"
         style={{ background: "transparent", color: "#FCA5A5", border: "1px solid #7F1D1D", cursor: "pointer" }}
-        onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#450A0A"; }}
-        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
       >
         Delete
       </button>
@@ -458,8 +456,6 @@ function FilterBar({
 
 const PAGE_SIZE = 25;
 
-type SortKey = keyof ListLead | null;
-
 export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: boolean }) {
   const router = useRouter();
   const { stages } = usePipelineStages();
@@ -475,8 +471,14 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
   const [page, setPage]         = useState(1);
   const [total, setTotal]       = useState(0);
   const [totalPages, setTotalPages] = useState(1);
-  const [sortKey, setSortKey]   = useState<SortKey>("followUpDate");
-  const [sortDir, setSortDir]   = useState<"up" | "down">("up");
+  const goToLastPage = useRef(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("goToLastPage") !== "1") return;
+    goToLastPage.current = true;
+    window.history.replaceState(window.history.state, "", "/pipeline/list");
+  }, []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -485,9 +487,7 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
         const params = new URLSearchParams({
           page: String(page),
           pageSize: String(PAGE_SIZE),
-          direction: sortDir === "down" ? "desc" : "asc",
         });
-        if (sortKey === "company" || sortKey === "followUpDate") params.set("sort", sortKey);
         Object.entries(filters).forEach(([key, value]) => { if (value) params.set(key, value); });
         if (search.trim()) params.set("q", search.trim());
         const response = await fetch(`/api/leads?${params.toString()}`);
@@ -518,7 +518,12 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
           };
         }));
         setTotal(result.total ?? result.leads?.length ?? 0);
-        setTotalPages(result.totalPages ?? 1);
+        const nextTotalPages = result.totalPages ?? 1;
+        setTotalPages(nextTotalPages);
+        if (goToLastPage.current) {
+          goToLastPage.current = false;
+          setPage(nextTotalPages);
+        }
       } catch {
         setError("Unable to reach the server. Please refresh and try again.");
       } finally {
@@ -528,7 +533,7 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
     void loadLeads();
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [filters, page, search, sortDir, sortKey]);
+  }, [filters, page, search]);
 
   useEffect(() => {
     const loadAssignees = async () => {
@@ -536,7 +541,6 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
         const response = await fetch("/api/users");
         const result = await response.json() as { users?: Array<AssignableUser & { status: string }> };
         if (!response.ok) return;
-        notifyCrmDataChanged("leads", "followups", "dashboard", "notifications");
         setAssignees((result.users ?? []).filter((user) => user.status === "active"));
       } catch {
         setAssignees([]);
@@ -568,16 +572,7 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
     return true;
   });
 
-  // Sort
-  const sorted = [...visible].sort((a, b) => {
-    if (!sortKey) return 0;
-    const av = a[sortKey], bv = b[sortKey];
-    if (av === bv) return 0;
-    const cmp = av! < bv! ? -1 : 1;
-    return sortDir === "up" ? cmp : -cmp;
-  });
-
-  const paged = sorted;
+  const paged = visible;
 
   const allPageSelected = paged.length > 0 && paged.every((l) => selected.has(l.id));
 
@@ -592,12 +587,6 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
   const toggleRow = (id: string) => {
     if (role !== "superadmin") return;
     setSelected((prev) => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
-  };
-
-  const handleSort = (key: SortKey) => {
-    setPage(1);
-    if (sortKey === key) setSortDir((d) => d === "up" ? "down" : "up");
-    else { setSortKey(key); setSortDir("up"); }
   };
 
   const handleBulkReassign = async (assigneeName: string) => {
@@ -627,6 +616,7 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
     if (!response.ok) return;
     setLeads((prev) => prev.filter((lead) => !selected.has(lead.id)));
     setSelected(new Set());
+    notifyCrmDataChanged("leads", "followups", "dashboard", "notifications");
   };
 
   const bulkActive = selected.size > 0 && role === "superadmin";
@@ -680,16 +670,16 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
                   ) : null}
                 </TH>
                 <TH center>PRI</TH>
-                <TH center sortable sortDir={sortKey === "company" ? sortDir : null} onClick={() => handleSort("company")}>Company</TH>
+                <TH center>Company</TH>
                 <TH center>Niche</TH>
                 <TH center>Source</TH>
                 <TH center>Contact</TH>
                 <TH center>Phone</TH>
-                <TH center sortable sortDir={sortKey === "stage" ? sortDir : null} onClick={() => handleSort("stage")}>Stage</TH>
-                <TH center sortable sortDir={sortKey === "followUpDate" ? sortDir : null} onClick={() => handleSort("followUpDate")}>Follow-up Date</TH>
+                <TH center >Stage</TH>
+                <TH center >Follow-up Date</TH>
                 <TH center>Time</TH>
-                <TH center sortable sortDir={sortKey === "daysInStage" ? sortDir : null} onClick={() => handleSort("daysInStage")} >Days in Stage</TH>
-                <TH center sortable sortDir={sortKey === "calls" ? sortDir : null} onClick={() => handleSort("calls")} >Calls</TH>
+                <TH center  >Days in Stage</TH>
+                <TH center >Calls</TH>
                 <TH center>Assignee</TH>
               </tr>
             </thead>

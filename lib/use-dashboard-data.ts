@@ -10,6 +10,7 @@ export interface DashboardFollowUp {
   stage: string;
   followUpDate: string | null;
   followUpTime: string | null;
+  lastOutcome?: string;
 }
 
 export interface DashboardStageHealth {
@@ -50,6 +51,7 @@ export interface DashboardData {
     today: DashboardFollowUp[];
     missed: DashboardFollowUp[];
     upcoming: DashboardFollowUp[];
+    meetings: DashboardFollowUp[];
   };
   pipelineHealth: {
     totalLeads: number;

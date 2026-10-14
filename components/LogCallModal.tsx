@@ -10,7 +10,8 @@ export type CallOutcome =
   | "no_answer"
   | "callback_requested"
   | "proposal_discussed"
-  | "meeting_set";
+  | "meeting_set"
+  | "portfolio_sent";
 
 export type Outcome = CallOutcome | null;
 
@@ -51,10 +52,14 @@ const OUTCOMES: { key: Exclude<Outcome, null>; meta: OutcomeMeta }[] = [
     key: "meeting_set",
     meta: { label: "Meeting Set",       bg: "#F59E0B", text: "#FFFFFF", border: "#F59E0B" },
   },
+  {
+    key: "portfolio_sent",
+    meta: { label: "Portfolio Sent",       bg: "#8B5CF6", text: "#FFFFFF", border: "#8B5CF6" },
+  },
 ];
 
 // Outcomes that require a follow-up schedule
-const REQUIRES_FOLLOWUP = new Set<Exclude<Outcome, null>>(["no_answer", "callback_requested","meeting_set"]);
+const REQUIRES_FOLLOWUP = new Set<Exclude<Outcome, null>>(["no_answer", "callback_requested","meeting_set",]);
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 

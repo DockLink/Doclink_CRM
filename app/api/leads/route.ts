@@ -9,13 +9,6 @@ import { CLOSED_LOST_OUTCOME } from "@/lib/lost-reasons";
 import { Prisma } from "../../../generated/prisma/client";
 
 const priorityValues = new Set(["hot", "warm", "cold"]);
-const listSortFields = {
-  company: "company",
-  followUpDate: "followUpDate",
-  createdAt: "createdAt",
-  stageChangedAt: "stageChangedAt",
-} as const;
-
 function text(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -106,8 +99,6 @@ export async function GET(request: Request) {
   const niche = text(searchParams.get("niche"));
   const priority = text(searchParams.get("priority"));
   const dateRange = text(searchParams.get("dateRange"));
-  const sort = text(searchParams.get("sort")) as keyof typeof listSortFields;
-  const direction = searchParams.get("direction") === "desc" ? "desc" : "asc";
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const dateFilter = dateRange === "Overdue"
@@ -141,9 +132,8 @@ export async function GET(request: Request) {
       ],
     } : {}),
   };
-  const orderBy = sort && listSortFields[sort]
-    ? { [listSortFields[sort]]: direction } as const
-    : { createdAt: "desc" as const };
+  // Lead position is based only on immutable creation order.
+  const orderBy = [{ createdAt: "desc" as const }, { id: "asc" as const }];
   const [leads, total] = await Promise.all([
     prisma.lead.findMany({
       where,
@@ -225,7 +215,9 @@ export async function PATCH(request: Request) {
   if (!profile) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await request.json() as { ids?: string[]; stage?: string; assigneeName?: string; lostReason?: string };
-  const ids = Array.isArray(body.ids) ? body.ids.filter((id): id is string => typeof id === "string") : [];
+  const ids = Array.isArray(body.ids)
+    ? [...new Set(body.ids.filter((id): id is string => typeof id === "string"))]
+    : [];
   if (ids.length === 0) return NextResponse.json({ error: "At least one lead id is required" }, { status: 400 });
 
   const data: { stageId?: string; assigneeId?: string; stageChangedAt?: Date; lostReason?: string | null; priority?: LeadPriority } = {};
@@ -276,10 +268,21 @@ export async function DELETE(request: Request) {
   const profile = await getProfile();
   if (!profile) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (profile.role !== "superadmin") return NextResponse.json({ error: "Only superadmins can delete leads" }, { status: 403 });
-
   const body = await request.json() as { ids?: string[] };
   const ids = Array.isArray(body.ids) ? body.ids.filter((id): id is string => typeof id === "string") : [];
   if (ids.length === 0) return NextResponse.json({ error: "At least one lead id is required" }, { status: 400 });
-  const result = await prisma.lead.deleteMany({ where: { id: { in: ids }, ...leadAccessWhere(profile) } });
-  return NextResponse.json({ deleted: result.count });
+  const deleted = await prisma.$transaction(async (transaction) => {
+    const accessible = await transaction.lead.findMany({
+      where: { id: { in: ids }, ...leadAccessWhere(profile) },
+      select: { id: true },
+    });
+    if (accessible.length !== ids.length) return null;
+
+    const accessibleIds = accessible.map((lead) => lead.id);
+    await transaction.leadCustomFieldValue.deleteMany({ where: { leadId: { in: accessibleIds } } });
+    await transaction.activity.deleteMany({ where: { leadId: { in: accessibleIds } } });
+    return transaction.lead.deleteMany({ where: { id: { in: accessibleIds } } });
+  });
+  if (!deleted) return NextResponse.json({ error: "One or more leads were not found" }, { status: 404 });
+  return NextResponse.json({ deleted: deleted.count });
 }

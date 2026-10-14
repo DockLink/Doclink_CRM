@@ -33,6 +33,7 @@ interface FollowUp {
   assignee: string;
   calls: number;
   notes: string;
+  lastOutcome: string;
 }
 
 function storedDateKey(iso: string | null) {
@@ -99,6 +100,7 @@ function toFollowUp(lead: ApiLead): FollowUp | null {
     assignee: lead.assigneeName,
     calls: lead.calls,
     notes: [outcomeLabel(lead.lastOutcome), lead.lastNotes].filter(Boolean).join(" — "),
+    lastOutcome: lead.lastOutcome ?? "",
   };
 }
 
@@ -280,7 +282,7 @@ function FollowUpRow({
     <div
       onClick={onClick}
       className="flex items-center gap-4 px-5 py-3.5 cursor-pointer"
-      style={{ background: rowBg, borderLeft, borderBottom: "1px solid #F3F4F6", transition: "background 150ms" }}
+      style={{ minWidth: 980, background: rowBg, borderLeft, borderBottom: "1px solid #F3F4F6", transition: "background 150ms" }}
       onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = variant === "overdue" ? "#FFF0F0" : "#F9FAFB"; }}
       onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = rowBg; }}
     >
@@ -379,6 +381,8 @@ function SectionCard({
         border: "1px solid #E3E7EF",
         boxShadow: "0 1px 4px rgba(15,27,60,0.06)",
         borderLeft: accentLeft ? `4px solid ${accentLeft}` : undefined,
+        overflowX: "auto",
+        overflowY: "visible",
       }}
     >
       {children}
@@ -616,9 +620,13 @@ export function FollowUps({ role }: { role: UserRole }) {
     }
   };
 
-  const todays = items.filter((f) => f.urgency === "today").sort((a, b) => a.time.localeCompare(b.time));
-  const missed = items.filter((f) => f.urgency === "overdue").sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
-  const upcoming = items.filter((f) => f.urgency === "upcoming").sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  const meetings = items
+    .filter((item) => item.lastOutcome === "meeting_set")
+    .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  const nonMeetingItems = items.filter((item) => item.lastOutcome !== "meeting_set");
+  const todays = nonMeetingItems.filter((f) => f.urgency === "today").sort((a, b) => a.time.localeCompare(b.time));
+  const missed = nonMeetingItems.filter((f) => f.urgency === "overdue").sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  const upcoming = nonMeetingItems.filter((f) => f.urgency === "upcoming").sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
 
   // Group upcoming by date
   const upcomingByDate: Record<string, FollowUp[]> = {};
@@ -706,6 +714,20 @@ export function FollowUps({ role }: { role: UserRole }) {
                   <FollowUpRow key={lead.id} variant="upcoming" {...rowProps(lead)} />
                 ))}
               </div>
+            ))}
+          </div>
+        )}
+      </SectionCard>
+
+      {/* ── Section 4: Meetings */}
+      <SectionCard id="meetings" accentLeft="#F59E0B">
+        <SectionHeader title="Follow-up Meetings" count={meetings.length} accentColor="#B45309" />
+        {meetings.length === 0 ? (
+          <EmptyState message="No follow-up meetings scheduled." />
+        ) : (
+          <div>
+            {meetings.map((lead) => (
+              <FollowUpRow key={lead.id} variant={lead.urgency === "overdue" ? "overdue" : "today"} {...rowProps(lead)} />
             ))}
           </div>
         )}
