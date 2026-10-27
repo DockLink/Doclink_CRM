@@ -56,6 +56,20 @@ model User {
   @@map("users")
 }
 
+// Login brute-force tracking (email + IP), used by /api/auth/login
+model LoginAttempt {
+  id              String    @id @default(uuid()) @db.Uuid
+  email           String
+  ip              String
+  failCount       Int       @default(0) @map("fail_count")
+  windowStartedAt DateTime  @default(now()) @map("window_started_at")
+  lockedUntil     DateTime? @map("locked_until")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@unique([email, ip])
+  @@map("login_attempts")
+}
+
 // ─────────────────────────────────────────────
 // Pipeline Stages  (SRS Section 5, 12.2, 14)
 // ─────────────────────────────────────────────
