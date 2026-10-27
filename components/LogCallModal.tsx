@@ -375,7 +375,9 @@ export function LogCallModal({
             >
               <div className="flex items-start justify-between">
                 <div>
-                  <p style={{ fontSize: 13, fontWeight: 700, color: "#0E7A70" }}>Schedule Follow-up</p>
+                <p style={{ fontSize: 13, fontWeight: 700, color: "#0E7A70" }}>
+                  {form.outcome === "meeting_set" ? "Schedule Meeting" : "Schedule Follow-up"}
+                </p>
                   <p style={{ fontSize: 11, color: "#0E7A70", opacity: 0.8, marginTop: 2 }}>
                     Required for this outcome
                   </p>

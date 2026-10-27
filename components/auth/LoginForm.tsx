@@ -1,41 +1,66 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
-import { createClient } from "@/lib/supabase/client";
 import { AlertIcon, EyeIcon, SpinnerIcon, XIcon } from "./icons";
 import { inputBase, inputDefault, inputErrorCls, inputFilled } from "./input-styles";
+import { SESSION_STARTED_STORAGE_KEY } from "@/lib/session-policy";
 
 export function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const reason = searchParams.get("reason");
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [emailFocused, setEmailFocused] = useState(false);
   const [passwordFocused, setPasswordFocused] = useState(false);
-  const [showError, setShowError] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+  const [infoMessage, setInfoMessage] = useState(() => {
+    if (reason === "idle") return "You were signed out due to inactivity.";
+    if (reason === "expired") return "Your session expired. Please sign in again.";
+    return "";
+  });
   const [isLoading, setIsLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    setShowError(false);
+    setErrorMessage("");
+    setInfoMessage("");
 
-    const { error } = await createClient().auth.signInWithPassword({
-      email: email.trim(),
-      password,
-    });
+    try {
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim(), password }),
+      });
+      const result = (await response.json().catch(() => ({}))) as { error?: string };
 
-    setIsLoading(false);
-    if (error) {
-      setShowError(true);
-      return;
+      if (response.status === 429) {
+        setErrorMessage(result.error || "Too many failed attempts. Try again later.");
+        setIsLoading(false);
+        return;
+      }
+
+      if (!response.ok) {
+        setErrorMessage(result.error || "Incorrect email or password.");
+        setIsLoading(false);
+        return;
+      }
+
+      sessionStorage.setItem(SESSION_STARTED_STORAGE_KEY, String(Date.now()));
+      router.push("/dashboard");
+      router.refresh();
+    } catch {
+      setErrorMessage("Unable to sign in. Please try again.");
+      setIsLoading(false);
     }
-
-    router.push("/dashboard");
-    router.refresh();
   };
+
+  const showError = Boolean(errorMessage);
 
   const emailCls = () => {
     if (showError && email) return `${inputBase} ${inputErrorCls}`;
@@ -55,6 +80,26 @@ export function LoginForm() {
         <p style={{ fontSize: 14, color: "#6B7280" }}>Sign in to your DocLink CRM account</p>
       </div>
 
+      {infoMessage && !showError && (
+        <div
+          className="flex items-start gap-2.5 px-3.5 py-3 rounded-lg border text-sm"
+          style={{ background: "#FFFBEB", borderColor: "#FCD34D", color: "#92400E" }}
+          role="status"
+        >
+          <span className="flex-1" style={{ fontWeight: 500 }}>
+            {infoMessage}
+          </span>
+          <button
+            type="button"
+            onClick={() => setInfoMessage("")}
+            className="shrink-0 opacity-60 hover:opacity-100 transition-opacity"
+            aria-label="Dismiss"
+          >
+            <XIcon />
+          </button>
+        </div>
+      )}
+
       {showError && (
         <div
           className="flex items-start gap-2.5 px-3.5 py-3 rounded-lg border text-sm"
@@ -65,11 +110,11 @@ export function LoginForm() {
             <AlertIcon />
           </span>
           <span className="flex-1" style={{ fontWeight: 500 }}>
-            Incorrect email or password.
+            {errorMessage}
           </span>
           <button
             type="button"
-            onClick={() => setShowError(false)}
+            onClick={() => setErrorMessage("")}
             className="shrink-0 opacity-60 hover:opacity-100 transition-opacity"
             aria-label="Dismiss"
           >
@@ -95,9 +140,6 @@ export function LoginForm() {
             autoComplete="email"
             disabled={isLoading}
           />
-          {showError && email && (
-            <p style={{ fontSize: 12, color: "#DC2626" }}>Please check your email address.</p>
-          )}
         </div>
 
         <div className="flex flex-col gap-1.5">
@@ -136,9 +178,6 @@ export function LoginForm() {
               Forgot password?
             </Link>
           </div>
-          {showError && password && (
-            <p style={{ fontSize: 12, color: "#DC2626" }}>Please check your password.</p>
-          )}
         </div>
 
         <button

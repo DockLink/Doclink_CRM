@@ -8,6 +8,12 @@ import { PAGE_ROUTES, pageTitleForPath, pathnameToPage, type UserRole } from "@/
 import { useDisplayName, useRole } from "@/lib/role-context";
 import { clearAllDrafts } from "@/lib/use-form-draft";
 import { onCrmDataChanged } from "@/lib/crm-invalidation";
+import {
+  IDLE_MS,
+  SESSION_STARTED_COOKIE,
+  SESSION_STARTED_STORAGE_KEY,
+  sessionAgeExceeded,
+} from "@/lib/session-policy";
 
 export type { UserRole };
 
@@ -611,18 +617,93 @@ function TopBar({ pageTitle, name, onSignOut }: { pageTitle: string; name: strin
 
 // ─── Shell wrapper ────────────────────────────────────────────────────────────
 
+function readSessionStartedAt(): number | null {
+  try {
+    const fromStorage = sessionStorage.getItem(SESSION_STARTED_STORAGE_KEY);
+    if (fromStorage) {
+      const value = Number(fromStorage);
+      if (Number.isFinite(value)) return value;
+    }
+  } catch {
+    // sessionStorage may be unavailable
+  }
+  const match = document.cookie
+    .split("; ")
+    .find((row) => row.startsWith(`${SESSION_STARTED_COOKIE}_client=`));
+  if (!match) return null;
+  const value = Number(decodeURIComponent(match.split("=").slice(1).join("=")));
+  return Number.isFinite(value) ? value : null;
+}
+
+function clearSessionStartMarkers() {
+  try {
+    sessionStorage.removeItem(SESSION_STARTED_STORAGE_KEY);
+  } catch {
+    // ignore
+  }
+  document.cookie = `${SESSION_STARTED_COOKIE}_client=; path=/; max-age=0`;
+}
+
 export function Shell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const role = useRole();
   const { name } = useDisplayName();
   const pageTitle = pageTitleForPath(pathname);
-  const handleSignOut = async () => {
+  const signingOutRef = useRef(false);
+
+  const endSession = useCallback(async (reason: "idle" | "expired" | "manual") => {
+    if (signingOutRef.current) return;
+    signingOutRef.current = true;
     clearAllDrafts();
-    await createClient().auth.signOut();
-    router.push("/login");
+    clearSessionStartMarkers();
+    try {
+      await createClient().auth.signOut();
+    } catch {
+      // still redirect
+    }
+    const query = reason === "manual" ? "" : `?reason=${reason}`;
+    router.push(`/login${query}`);
     router.refresh();
-  };
+  }, [router]);
+
+  const handleSignOut = useCallback(() => {
+    void endSession("manual");
+  }, [endSession]);
+
+  useEffect(() => {
+    const idleMs = IDLE_MS[role];
+    let lastActive = Date.now();
+    const onActivity = () => {
+      lastActive = Date.now();
+    };
+    const events: Array<keyof WindowEventMap> = [
+      "mousemove",
+      "mousedown",
+      "keydown",
+      "scroll",
+      "touchstart",
+      "click",
+    ];
+    events.forEach((event) => window.addEventListener(event, onActivity, { passive: true }));
+
+    const timer = window.setInterval(() => {
+      const now = Date.now();
+      if (now - lastActive >= idleMs) {
+        void endSession("idle");
+        return;
+      }
+      const startedAt = readSessionStartedAt();
+      if (startedAt !== null && sessionAgeExceeded(startedAt, now)) {
+        void endSession("expired");
+      }
+    }, 15_000);
+
+    return () => {
+      events.forEach((event) => window.removeEventListener(event, onActivity));
+      window.clearInterval(timer);
+    };
+  }, [role, endSession]);
 
   return (
     <div className="min-h-screen" style={{ background: "#FAFAFA" }}>

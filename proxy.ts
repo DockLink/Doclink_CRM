@@ -1,8 +1,17 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import type { UserRole } from "@/lib/types";
+import {
+  SESSION_STARTED_COOKIE,
+  sessionAgeExceeded,
+} from "@/lib/session-policy";
 
-const publicPaths = ["/login", "/forgot-password", "/reset-password"];
+const publicPaths = [
+  "/login",
+  "/forgot-password",
+  "/reset-password",
+  "/api/auth/login",
+];
 
 async function getRole(
   supabase: ReturnType<typeof createServerClient>,
@@ -20,6 +29,11 @@ async function getRole(
   }
 
   return null;
+}
+
+function clearSessionCookies(response: NextResponse) {
+  response.cookies.set(SESSION_STARTED_COOKIE, "", { path: "/", maxAge: 0 });
+  response.cookies.set(`${SESSION_STARTED_COOKIE}_client`, "", { path: "/", maxAge: 0 });
 }
 
 export async function proxy(request: NextRequest) {
@@ -45,6 +59,39 @@ export async function proxy(request: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser();
   const isPublicPath = publicPaths.some((path) => request.nextUrl.pathname.startsWith(path));
+
+  if (user) {
+    const startedRaw = request.cookies.get(SESSION_STARTED_COOKIE)?.value;
+    const startedAt = startedRaw ? Number(startedRaw) : NaN;
+
+    if (!Number.isFinite(startedAt)) {
+      // Existing sessions created before this cookie existed: stamp "now"
+      // so they get a full 8-hour window from first request after deploy.
+      const now = String(Date.now());
+      response.cookies.set(SESSION_STARTED_COOKIE, now, {
+        path: "/",
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        httpOnly: true,
+        maxAge: 8 * 60 * 60,
+      });
+      response.cookies.set(`${SESSION_STARTED_COOKIE}_client`, now, {
+        path: "/",
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        httpOnly: false,
+        maxAge: 8 * 60 * 60,
+      });
+    } else if (sessionAgeExceeded(startedAt)) {
+      await supabase.auth.signOut();
+      const loginUrl = request.nextUrl.clone();
+      loginUrl.pathname = "/login";
+      loginUrl.search = "reason=expired";
+      const redirect = NextResponse.redirect(loginUrl);
+      clearSessionCookies(redirect);
+      return redirect;
+    }
+  }
 
   if (!user && !isPublicPath) {
     const loginUrl = request.nextUrl.clone();
