@@ -65,7 +65,12 @@ export async function POST(request: Request) {
   }
 
   const admin = createAdminClient();
-  const { data: authData, error: authError } = await admin.auth.admin.createUser({ email, password, email_confirm: true });
+  const { data: authData, error: authError } = await admin.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+    app_metadata: { role },
+  });
   if (authError || !authData.user) return NextResponse.json({ error: authError?.message ?? "Unable to create login account" }, { status: 400 });
 
   try {
@@ -140,7 +145,7 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "Password must be at least 8 characters" }, { status: 400 });
   }
 
-  if (password !== undefined || data.email) {
+  if (password !== undefined || data.email || data.role !== undefined) {
     if (isPublicSupabaseKey(process.env.SUPABASE_SERVICE_ROLE_KEY)) {
       return NextResponse.json({ error: "Server configuration error: SUPABASE_SERVICE_ROLE_KEY must be the Supabase service_role secret, not the anon public key" }, { status: 500 });
     }
@@ -148,10 +153,25 @@ export async function PATCH(request: Request) {
     const authUserId = await findAuthUserId(admin, target);
     if (!authUserId) return NextResponse.json({ error: "No login account found for this user" }, { status: 404 });
 
-    const { error: authError } = await admin.auth.admin.updateUserById(authUserId, {
+    const authUpdate: {
+      password?: string;
+      email?: string;
+      email_confirm?: boolean;
+      app_metadata?: Record<string, unknown>;
+    } = {
       ...(password !== undefined ? { password } : {}),
       ...(data.email ? { email: data.email, email_confirm: true } : {}),
-    });
+    };
+
+    if (data.role !== undefined) {
+      const { data: existingAuth } = await admin.auth.admin.getUserById(authUserId);
+      authUpdate.app_metadata = {
+        ...(existingAuth?.user?.app_metadata ?? {}),
+        role: data.role,
+      };
+    }
+
+    const { error: authError } = await admin.auth.admin.updateUserById(authUserId, authUpdate);
     if (authError) return NextResponse.json({ error: authError.message }, { status: 400 });
   }
 

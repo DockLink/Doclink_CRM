@@ -61,11 +61,24 @@ async function main() {
     if (error) throw error;
   }
 
+  const passwordHash = await bcrypt.hash(password, 12);
+  const existing = await prisma.user.findUnique({ where: { email } });
+
+  // Keep public.users.id aligned with auth.users.id (login + middleware both key by Auth id).
+  // Referencing FKs use ON UPDATE CASCADE in the init migration.
+  if (existing && existing.id !== authUser.id) {
+    await prisma.$executeRaw`
+      UPDATE users
+      SET id = ${authUser.id}::uuid
+      WHERE email = ${email}
+    `;
+  }
+
   const user = await prisma.user.upsert({
     where: { email },
     update: {
       name: "Super Admin",
-      passwordHash: await bcrypt.hash(password, 12),
+      passwordHash,
       role: "superadmin",
       isActive: true,
     },
@@ -73,13 +86,13 @@ async function main() {
       id: authUser.id,
       name: "Super Admin",
       email,
-      passwordHash: await bcrypt.hash(password, 12),
+      passwordHash,
       role: "superadmin",
       isActive: true,
     },
   });
 
-  console.log(`Superadmin created: ${user.email}`);
+  console.log(`Superadmin created: ${user.email} (${user.id})`);
 }
 
 main()

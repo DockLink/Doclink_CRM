@@ -13,10 +13,15 @@ const publicPaths = [
   "/api/auth/login",
 ];
 
+function roleFromValue(value: unknown): UserRole | null {
+  return value === "superadmin" || value === "admin" ? value : null;
+}
+
 async function getRole(
   supabase: ReturnType<typeof createServerClient>,
-  user: { id: string },
+  user: { id: string; app_metadata?: Record<string, unknown> },
 ): Promise<UserRole | null> {
+  // Prefer the CRM profile table (same source of truth as API routes).
   const { data: profile, error } = await supabase
     .from("users")
     .select("role,is_active")
@@ -25,10 +30,12 @@ async function getRole(
 
   if (!error && profile) {
     if (!profile.is_active) return null;
-    return profile.role === "superadmin" || profile.role === "admin" ? profile.role : null;
+    return roleFromValue(profile.role);
   }
 
-  return null;
+  // Fallback when PostgREST/RLS cannot read public.users (e.g. missing GRANT).
+  // JWT app_metadata.role is maintained by seed + user/profile APIs.
+  return roleFromValue(user.app_metadata?.role);
 }
 
 function clearSessionCookies(response: NextResponse) {
