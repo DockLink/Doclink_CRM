@@ -11,13 +11,19 @@ export function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const reason = searchParams.get("reason");
+  const authError = searchParams.get("error");
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [emailFocused, setEmailFocused] = useState(false);
   const [passwordFocused, setPasswordFocused] = useState(false);
-  const [errorMessage, setErrorMessage] = useState("");
+  const [errorMessage, setErrorMessage] = useState(() => {
+    if (authError === "role_not_configured") {
+      return "Your account is authenticated but has no CRM role configured. Contact an administrator.";
+    }
+    return "";
+  });
   const [infoMessage, setInfoMessage] = useState(() => {
     if (reason === "idle") return "You were signed out due to inactivity.";
     if (reason === "expired") return "Your session expired. Please sign in again.";
@@ -41,13 +47,11 @@ export function LoginForm() {
 
       if (response.status === 429) {
         setErrorMessage(result.error || "Too many failed attempts. Try again later.");
-        setIsLoading(false);
         return;
       }
 
       if (!response.ok) {
         setErrorMessage(result.error || "Incorrect email or password.");
-        setIsLoading(false);
         return;
       }
 
@@ -56,6 +60,7 @@ export function LoginForm() {
       router.refresh();
     } catch {
       setErrorMessage("Unable to sign in. Please try again.");
+    } finally {
       setIsLoading(false);
     }
   };
