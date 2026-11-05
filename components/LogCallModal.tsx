@@ -58,9 +58,6 @@ const OUTCOMES: { key: Exclude<Outcome, null>; meta: OutcomeMeta }[] = [
   },
 ];
 
-// Outcomes that require a follow-up schedule
-const REQUIRES_FOLLOWUP = new Set<Exclude<Outcome, null>>(["no_answer", "callback_requested","meeting_set",]);
-
 // ─── Icons ────────────────────────────────────────────────────────────────────
 
 function XIcon() {
@@ -234,10 +231,9 @@ export function LogCallModal({
   const [submitted, setSubmitted] = useState(false);
   const [saveError, setSaveError] = useState("");
 
-  const requiresFollowUp = form.outcome && REQUIRES_FOLLOWUP.has(form.outcome);
+  // Show optional follow-up for any selected outcome
+  const showFollowUp = Boolean(form.outcome);
   const outcomeError = submitted && !form.outcome;
-  const followUpDateError = submitted && requiresFollowUp && !form.followUpDate;
-  const followUpTimeError = submitted && requiresFollowUp && !form.followUpTime;
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === "Escape" && onClose) onClose(); };
@@ -249,7 +245,6 @@ export function LogCallModal({
     setSubmitted(true);
     setSaveError("");
     if (!form.outcome) return;
-    if (requiresFollowUp && (!form.followUpDate || !form.followUpTime)) return;
     try {
       await onSave?.(form);
       clearDraft();
@@ -363,8 +358,8 @@ export function LogCallModal({
             />
           </div>
 
-          {/* Conditional follow-up section */}
-          {requiresFollowUp && (
+          {/* Optional follow-up section — shown for every outcome */}
+          {showFollowUp && (
             <div
               className="rounded-xl flex flex-col gap-4 px-4 py-4"
               style={{
@@ -373,60 +368,40 @@ export function LogCallModal({
                 animation: "fadeSlideIn 180ms ease",
               }}
             >
-              <div className="flex items-start justify-between">
-                <div>
+              <div>
                 <p style={{ fontSize: 13, fontWeight: 700, color: "#0E7A70" }}>
                   {form.outcome === "meeting_set" ? "Schedule Meeting" : "Schedule Follow-up"}
                 </p>
-                  <p style={{ fontSize: 11, color: "#0E7A70", opacity: 0.8, marginTop: 2 }}>
-                    Required for this outcome
-                  </p>
-                </div>
-                <span
-                  className="px-2.5 py-0.5 rounded-full text-xs font-semibold"
-                  style={{ background: "#0E7A7020", color: "#0E7A70" }}
-                >
-                  Required
-                </span>
+                <p style={{ fontSize: 11, color: "#0E7A70", opacity: 0.8, marginTop: 2 }}>
+                  Optional — leave blank if not needed
+                </p>
               </div>
 
               <div className="flex gap-3">
                 {/* Follow-up Date */}
                 <div style={{ flex: 1 }}>
                   <label style={{ fontSize: 11, fontWeight: 600, color: "#0E7A70", display: "block", marginBottom: 5 }}>
-                    Date {followUpDateError && <span style={{ color: "#DC2626" }}>*</span>}
+                    Date
                   </label>
                   <DateTimeInput
                     type="date"
                     value={form.followUpDate}
                     onChange={(v) => setForm((prev) => ({ ...prev, followUpDate: v }))}
-                    error={followUpDateError || undefined}
                     icon={<CalendarIcon />}
                   />
-                  {followUpDateError && (
-                    <p className="flex items-center gap-1 mt-1" style={{ fontSize: 11, color: "#DC2626" }}>
-                      <AlertIcon /> Date is required
-                    </p>
-                  )}
                 </div>
 
                 {/* Follow-up Time */}
                 <div style={{ flex: 1 }}>
                   <label style={{ fontSize: 11, fontWeight: 600, color: "#0E7A70", display: "block", marginBottom: 5 }}>
-                    Time {followUpTimeError && <span style={{ color: "#DC2626" }}>*</span>}
+                    Time
                   </label>
                   <DateTimeInput
                     type="time"
                     value={form.followUpTime}
                     onChange={(v) => setForm((prev) => ({ ...prev, followUpTime: v }))}
-                    error={followUpTimeError || undefined}
                     icon={<ClockIcon />}
                   />
-                  {followUpTimeError && (
-                    <p className="flex items-center gap-1 mt-1" style={{ fontSize: 11, color: "#DC2626" }}>
-                      <AlertIcon /> Time is required
-                    </p>
-                  )}
                 </div>
               </div>
             </div>

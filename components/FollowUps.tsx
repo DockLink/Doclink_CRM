@@ -302,16 +302,16 @@ function FollowUpRow({
       </div>
 
       {/* Company + niche */}
-      <div style={{ flex: "0 0 240px" }}>
-        <p style={{ fontSize: 13, fontWeight: 600, color: "#111111", marginBottom: 1 }}>{lead.company}</p>
-        <p className="flex items-center gap-1.5" style={{ fontSize: 11, color: "#6B7280" }}>
-          <span>{lead.niche}</span>
-          <span className="px-1.5 py-0.5 rounded-full" style={{ background: `${color}22`, color, fontWeight: 600 }}>
+      <div style={{ flex: "0 0 240px", minWidth: 0, maxWidth: 240, overflow: "hidden" }}>
+        <p style={{ fontSize: 13, fontWeight: 600, color: "#111111", marginBottom: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{lead.company}</p>
+        <p className="flex items-center gap-1.5" style={{ fontSize: 11, color: "#6B7280", minWidth: 0 }}>
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{lead.niche}</span>
+          <span className="px-1.5 py-0.5 rounded-full shrink-0" style={{ background: `${color}22`, color, fontWeight: 600 }}>
             {lead.stage}
           </span>
         </p>
         {lead.notes && (
-          <p style={{ fontSize: 11, color: "#374151", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{lead.notes}</p>
+          <p title={lead.notes} style={{ fontSize: 11, color: "#374151", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{lead.notes}</p>
         )}
       </div>
 

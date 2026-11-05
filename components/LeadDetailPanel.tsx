@@ -524,9 +524,9 @@ function DetailsTab({ lead, role, stages, onLeadChange, onMarkDead }: { lead: Le
     && lead.lastContacted?.outcome !== CLOSED_LOST_OUTCOME;
 
   return (
-    <div className="flex gap-5 p-5">
+    <div className="flex gap-5 p-5 min-w-0">
       {/* Left 60% */}
-      <div className="flex flex-col gap-4" style={{ flex: "0 0 60%" }}>
+      <div className="flex flex-col gap-4 min-w-0" style={{ flex: "0 0 60%" }}>
 
         {/* Quick Actions */}
         <Card title="Quick Actions">
@@ -657,34 +657,34 @@ function DetailsTab({ lead, role, stages, onLeadChange, onMarkDead }: { lead: Le
       </div>
 
       {/* Right 40% */}
-      <div className="flex flex-col gap-4" style={{ flex: 1 }}>
+      <div className="flex flex-col gap-4 min-w-0" style={{ flex: 1 }}>
 
         <InfoCard lead={lead} role={role} onLeadChange={onLeadChange} />
 
         {/* Last Contacted */}
         <Card title="Last Contacted">
-          <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-3 min-w-0">
             {showLegacyLostReason && (
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-2 min-w-0">
                 <span
                   className="self-start px-2.5 py-1 rounded-full text-xs font-semibold"
                   style={{ background: "#FEE2E2", color: "#B91C1C" }}
                 >
                   Closed Lost
                 </span>
-                <p style={{ fontSize: 13, color: "#374151", lineHeight: 1.6 }}>{lead.lostReason}</p>
+                <p style={{ fontSize: 13, color: "#374151", lineHeight: 1.6, overflowWrap: "anywhere", wordBreak: "break-word", minWidth: 0 }}>{lead.lostReason}</p>
               </div>
             )}
             {lead.lastContacted ? (
               <div
-                className="flex flex-col gap-2.5"
+                className="flex flex-col gap-2.5 min-w-0"
                 style={showLegacyLostReason ? { paddingTop: 12, borderTop: "1px solid #F3F4F6" } : undefined}
               >
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-2 min-w-0">
                   <OutcomeBadge outcome={lead.lastContacted.outcome} />
-                  <span style={{ fontSize: 11, color: "#9CA3AF" }}>{lead.lastContacted.relativeTime}</span>
+                  <span className="shrink-0" style={{ fontSize: 11, color: "#9CA3AF" }}>{lead.lastContacted.relativeTime}</span>
                 </div>
-                <p style={{ fontSize: 13, color: "#374151", lineHeight: 1.6 }}>{lead.lastContacted.note}</p>
+                <p style={{ fontSize: 13, color: "#374151", lineHeight: 1.6, overflowWrap: "anywhere", wordBreak: "break-word", minWidth: 0 }}>{lead.lastContacted.note}</p>
               </div>
             ) : !showLegacyLostReason ? (
               <p style={{ fontSize: 13, color: "#9CA3AF" }}>No calls logged yet.</p>
@@ -739,7 +739,7 @@ function ActivityTab({ lead }: { lead: LeadDetail }) {
       </div>
 
       {/* Timeline */}
-      <div className="relative flex flex-col gap-0" style={{ paddingLeft: 28 }}>
+      <div className="relative flex flex-col gap-0 min-w-0" style={{ paddingLeft: 28 }}>
         {/* Vertical connecting line */}
         <div
           className="absolute"
@@ -749,7 +749,7 @@ function ActivityTab({ lead }: { lead: LeadDetail }) {
         {lead.activity.map((entry, idx) => {
           const meta = OUTCOME_META[entry.outcome as CallOutcome] ?? { label: entry.outcome, bg: "#F1F5F9", color: "#64748B" };
           return (
-            <div key={entry.id} className="relative flex flex-col gap-1.5 pb-7">
+            <div key={entry.id} className="relative flex flex-col gap-1.5 pb-7 min-w-0">
               {/* Timeline dot */}
               <div
                 className="absolute flex items-center justify-center rounded-full"
@@ -760,15 +760,15 @@ function ActivityTab({ lead }: { lead: LeadDetail }) {
 
               {/* Entry card */}
               <div
-                className="rounded-lg p-4 flex flex-col gap-2"
+                className="rounded-lg p-4 flex flex-col gap-2 min-w-0 overflow-hidden"
                 style={{ background: idx === 0 ? "#F9FAFB" : "#FFFFFF", border: "1px solid #E3E7EF" }}
               >
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-2 min-w-0">
                   <OutcomeBadge outcome={entry.outcome} />
-                  <span style={{ fontSize: 11, color: "#9CA3AF" }}>{entry.relativeTime}</span>
+                  <span className="shrink-0" style={{ fontSize: 11, color: "#9CA3AF" }}>{entry.relativeTime}</span>
                 </div>
-                <p style={{ fontSize: 13, color: "#374151", lineHeight: 1.65 }}>{entry.notes}</p>
-                <p style={{ fontSize: 11, color: "#9CA3AF" }}>Logged by {entry.loggedBy} · {entry.timestamp}</p>
+                <p style={{ fontSize: 13, color: "#374151", lineHeight: 1.65, overflowWrap: "anywhere", wordBreak: "break-word", minWidth: 0 }}>{entry.notes}</p>
+                <p style={{ fontSize: 11, color: "#9CA3AF", overflowWrap: "anywhere", wordBreak: "break-word" }}>Logged by {entry.loggedBy} · {entry.timestamp}</p>
               </div>
             </div>
           );
@@ -782,21 +782,35 @@ function ActivityTab({ lead }: { lead: LeadDetail }) {
 
 function Card({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
   return (
-    <div className="rounded-xl flex flex-col" style={{ background: "#FFFFFF", border: "1px solid #E3E7EF", overflow: "hidden" }}>
+    <div className="rounded-xl flex flex-col min-w-0" style={{ background: "#FFFFFF", border: "1px solid #E3E7EF", overflow: "hidden" }}>
       <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: "1px solid #F3F4F6" }}>
         <h3 style={{ fontSize: 12, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.07em" }}>{title}</h3>
         {action}
       </div>
-      <div className="px-4 py-4">{children}</div>
+      <div className="px-4 py-4 min-w-0">{children}</div>
     </div>
   );
 }
 
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between">
-      <span style={{ fontSize: 12, color: "#6B7280" }}>{label}</span>
-      <span style={{ fontSize: 13, fontWeight: 500, color: value ? "#111111" : "#9CA3AF" }}>{value || "—"}</span>
+    <div className="flex items-center justify-between gap-3 min-w-0">
+      <span className="shrink-0" style={{ fontSize: 12, color: "#6B7280" }}>{label}</span>
+      <span
+        title={value || undefined}
+        className="min-w-0"
+        style={{
+          fontSize: 13,
+          fontWeight: 500,
+          color: value ? "#111111" : "#9CA3AF",
+          textAlign: "right",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {value || "—"}
+      </span>
     </div>
   );
 }
@@ -1172,18 +1186,24 @@ function InfoCard({ lead, role, onLeadChange }: { lead: LeadDetail; role: UserRo
 
   return (
     <Card title="Info" action={editAction}>
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-3 min-w-0">
         <InfoRow label="Company" value={lead.company} />
         <InfoRow label="Niche" value={lead.niche} />
         <InfoRow label="Contact" value={lead.contact} />
-        <div className="flex items-center justify-between">
-          <span style={{ fontSize: 12, color: "#6B7280" }}>Phone</span>
-          <div className="flex items-center gap-1.5">
-            <span style={{ fontSize: 13, fontWeight: 500, color: lead.phone ? "#111111" : "#9CA3AF" }}>{lead.phone || "—"}</span>
+        <div className="flex items-center justify-between gap-3 min-w-0">
+          <span className="shrink-0" style={{ fontSize: 12, color: "#6B7280" }}>Phone</span>
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span
+              title={lead.phone || undefined}
+              className="min-w-0"
+              style={{ fontSize: 13, fontWeight: 500, color: lead.phone ? "#111111" : "#9CA3AF", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+            >
+              {lead.phone || "—"}
+            </span>
             {lead.phone && (
               <button
                 onClick={handleCopy}
-                className="flex items-center justify-center rounded"
+                className="flex items-center justify-center rounded shrink-0"
                 style={{ width: 22, height: 22, color: copied ? "#2FBEB3" : "#9CA3AF", background: copied ? "#E3F7F5" : "transparent" }}
                 title="Copy phone"
               >
@@ -1192,17 +1212,17 @@ function InfoCard({ lead, role, onLeadChange }: { lead: LeadDetail; role: UserRo
             )}
           </div>
         </div>
-        <div className="flex items-center justify-between">
-          <span style={{ fontSize: 12, color: "#6B7280" }}>Source</span>
+        <div className="flex items-center justify-between gap-3 min-w-0">
+          <span className="shrink-0" style={{ fontSize: 12, color: "#6B7280" }}>Source</span>
           {lead.source
-            ? <span className="px-2.5 py-0.5 rounded-full" style={{ fontSize: 11, fontWeight: 600, background: "#E3F7F5", color: "#0E7A70" }}>{lead.source}</span>
+            ? <span title={lead.source} className="min-w-0 px-2.5 py-0.5 rounded-full" style={{ fontSize: 11, fontWeight: 600, background: "#E3F7F5", color: "#0E7A70", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }}>{lead.source}</span>
             : <span style={{ fontSize: 13, color: "#9CA3AF" }}>—</span>}
         </div>
-        <div className="flex items-center justify-between">
-          <span style={{ fontSize: 12, color: "#6B7280" }}>Assignee</span>
-          <div className="flex items-center gap-2">
-            <span className="w-6 h-6 rounded-full flex items-center justify-center text-white font-bold" style={{ background: lead.assigneeColor, fontSize: 10 }}>{lead.assigneeInitials}</span>
-            <span style={{ fontSize: 13, fontWeight: 500, color: "#111111" }}>{lead.assignee}</span>
+        <div className="flex items-center justify-between gap-3 min-w-0">
+          <span className="shrink-0" style={{ fontSize: 12, color: "#6B7280" }}>Assignee</span>
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="w-6 h-6 rounded-full flex items-center justify-center text-white font-bold shrink-0" style={{ background: lead.assigneeColor, fontSize: 10 }}>{lead.assigneeInitials}</span>
+            <span title={lead.assignee} className="min-w-0" style={{ fontSize: 13, fontWeight: 500, color: "#111111", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{lead.assignee}</span>
           </div>
         </div>
       </div>

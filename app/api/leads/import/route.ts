@@ -129,6 +129,8 @@ export async function POST(request: Request) {
     const failedRows: Array<{ row: number; error: string }> = [];
     let skipped = 0;
     const customFieldData: Array<{ leadId: string; customFieldId: string; value: string }> = [];
+    // Newest-first list sort (createdAt desc): Excel row 1 must get the newest timestamp.
+    const importBaseMs = Date.now();
     const leadData: Array<{
       id: string;
       company: string;
@@ -142,6 +144,7 @@ export async function POST(request: Request) {
       stageId: string;
       assigneeId: string;
       createdBy: string;
+      createdAt: Date;
       proposalSent: boolean;
       proposalSentDate?: Date;
     }> = [];
@@ -186,6 +189,8 @@ export async function POST(request: Request) {
         stageId: rowStage.id,
         assigneeId: rowAssignee.id,
         createdBy: profile.id,
+        // Spreadsheet index keeps relative Excel order even when some rows are skipped.
+        createdAt: new Date(importBaseMs - index),
         proposalSent,
         proposalSentDate: proposalSent ? new Date() : undefined,
       });
