@@ -423,6 +423,71 @@ function SectionHeader({
   );
 }
 
+function groupFollowUpsByDate(list: FollowUp[]) {
+  const map: Record<string, FollowUp[]> = {};
+  for (const item of list) {
+    if (!map[item.date]) map[item.date] = [];
+    map[item.date].push(item);
+  }
+  return map;
+}
+
+type MeetingRowProps = {
+  lead: FollowUp;
+  onClick: () => void;
+  onCall: () => void;
+  onReschedule: () => void;
+  onMarkDone: () => void;
+};
+
+function MeetingDateGroups({
+  dates,
+  byDate,
+  rowProps,
+  rowVariant,
+  countBg = "#E3F7F5",
+  countColor = "#0E7A70",
+  startBorder = false,
+}: {
+  dates: string[];
+  byDate: Record<string, FollowUp[]>;
+  rowProps: (lead: FollowUp) => MeetingRowProps;
+  rowVariant: "overdue" | "upcoming";
+  countBg?: string;
+  countColor?: string;
+  startBorder?: boolean;
+}) {
+  return (
+    <>
+      {dates.map((date, di) => (
+        <div key={date}>
+          <div
+            className="px-5 py-2.5 flex items-center gap-2"
+            style={{
+              background: "#F9FAFB",
+              borderBottom: "1px solid #F3F4F6",
+              borderTop: di > 0 || startBorder ? "1px solid #E3E7EF" : undefined,
+            }}
+          >
+            <span style={{ fontSize: 11, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.07em" }}>
+              {dateSectionLabel(date)}
+            </span>
+            <span
+              className="flex items-center justify-center rounded-full"
+              style={{ width: 18, height: 18, background: countBg, color: countColor, fontSize: 10, fontWeight: 700 }}
+            >
+              {byDate[date].length}
+            </span>
+          </div>
+          {byDate[date].map((lead) => (
+            <FollowUpRow key={lead.id} variant={rowVariant} {...rowProps(lead)} />
+          ))}
+        </div>
+      ))}
+    </>
+  );
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 function RescheduleModal({
@@ -620,9 +685,23 @@ export function FollowUps({ role }: { role: UserRole }) {
     }
   };
 
-  const meetings = items
-    .filter((item) => item.lastOutcome === "meeting_set")
+  const todayKey = localDateKey(new Date());
+  const allMeetings = items.filter((item) => item.lastOutcome === "meeting_set");
+  const meetingToday = allMeetings
+    .filter((m) => m.date === todayKey)
+    .sort((a, b) => a.time.localeCompare(b.time));
+  const meetingFuture = allMeetings
+    .filter((m) => m.date > todayKey)
     .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  const meetingPast = allMeetings
+    .filter((m) => m.date < todayKey)
+    .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  const meetingFutureByDate = groupFollowUpsByDate(meetingFuture);
+  const meetingPastByDate = groupFollowUpsByDate(meetingPast);
+  const meetingFutureDates = Object.keys(meetingFutureByDate).sort();
+  const meetingPastDates = Object.keys(meetingPastByDate).sort().reverse();
+  const meetingsCount = meetingToday.length + meetingFuture.length + meetingPast.length;
+
   const nonMeetingItems = items.filter((item) => item.lastOutcome !== "meeting_set");
   const todays = nonMeetingItems.filter((f) => f.urgency === "today").sort((a, b) => a.time.localeCompare(b.time));
   const missed = nonMeetingItems.filter((f) => f.urgency === "overdue").sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
@@ -636,7 +715,7 @@ export function FollowUps({ role }: { role: UserRole }) {
   }
   const upcomingDates = Object.keys(upcomingByDate).sort();
 
-  const rowProps = (lead: FollowUp) => ({
+  const rowProps = (lead: FollowUp): MeetingRowProps => ({
     lead,
     onClick: () => openLeadDetails(lead),
     onCall: () => setCallLead(lead),
@@ -719,16 +798,36 @@ export function FollowUps({ role }: { role: UserRole }) {
         )}
       </SectionCard>
 
-      {/* ── Section 4: Meetings */}
+      {/* ── Section 4: Meetings — today → future (by day) → past (by day) */}
       <SectionCard id="meetings" accentLeft="#F59E0B">
-        <SectionHeader title="Follow-up Meetings" count={meetings.length} accentColor="#B45309" />
-        {meetings.length === 0 ? (
+        <SectionHeader title="Follow-up Meetings" count={meetingsCount} accentColor="#B45309" />
+        {meetingsCount === 0 ? (
           <EmptyState message="No follow-up meetings scheduled." />
         ) : (
           <div>
-            {meetings.map((lead) => (
-              <FollowUpRow key={lead.id} variant={lead.urgency === "overdue" ? "overdue" : "today"} {...rowProps(lead)} />
+            {meetingToday.map((lead) => (
+              <FollowUpRow
+                key={lead.id}
+                variant={lead.urgency === "overdue" ? "overdue" : "today"}
+                {...rowProps(lead)}
+              />
             ))}
+            <MeetingDateGroups
+              dates={meetingFutureDates}
+              byDate={meetingFutureByDate}
+              rowProps={rowProps}
+              rowVariant="upcoming"
+              startBorder={meetingToday.length > 0}
+            />
+            <MeetingDateGroups
+              dates={meetingPastDates}
+              byDate={meetingPastByDate}
+              rowProps={rowProps}
+              rowVariant="overdue"
+              countBg="#FEF2F2"
+              countColor="#DC2626"
+              startBorder={meetingToday.length > 0 || meetingFutureDates.length > 0}
+            />
           </div>
         )}
       </SectionCard>
