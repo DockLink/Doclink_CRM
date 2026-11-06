@@ -1,5 +1,11 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+# DocLink CRM
+
+Internal CRM for managing leads, pipeline stages, follow-ups, and team activity.
+
+Built with Next.js, Prisma, and Supabase Auth.
+
 ## Getting Started
 
 First, run the development server:
