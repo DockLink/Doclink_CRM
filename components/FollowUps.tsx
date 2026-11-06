@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useRef, useEffect, useMemo, type ReactNode } from "react";
+import { useState, useRef, useEffect, useMemo, type ReactNode, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import type { UserRole } from "@/lib/types";
 import { type ApiLead, localDateKey, urgencyFor } from "@/lib/lead-ui";
@@ -192,6 +193,10 @@ function UserIcon() {
 
 // ─── Kebab Menu ───────────────────────────────────────────────────────────────
 
+const KEBAB_MENU_MIN_WIDTH = 160;
+/** Approximate menu height: 3 items × ~40px */
+const KEBAB_MENU_EST_HEIGHT = 120;
+
 function KebabMenu({
   onReschedule,
   onMarkDone,
@@ -202,51 +207,109 @@ function KebabMenu({
   onViewLead: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const [menuStyle, setMenuStyle] = useState<CSSProperties | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    if (!open) {
+      setMenuStyle(null);
+      return;
+    }
+
+    const updatePosition = () => {
+      const trigger = triggerRef.current;
+      if (!trigger) return;
+      const rect = trigger.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const openUpward = spaceBelow < KEBAB_MENU_EST_HEIGHT + 8 && rect.top > spaceBelow;
+      setMenuStyle({
+        position: "fixed",
+        top: openUpward ? undefined : rect.bottom + 4,
+        bottom: openUpward ? window.innerHeight - rect.top + 4 : undefined,
+        left: Math.max(8, rect.right - KEBAB_MENU_MIN_WIDTH),
+        minWidth: KEBAB_MENU_MIN_WIDTH,
+        zIndex: 50,
+        background: "#FFFFFF",
+        boxShadow: "0 4px 16px rgba(15,27,60,0.12)",
+        border: "1px solid #E3E7EF",
+      });
     };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+
+    updatePosition();
+
+    const onPointerDown = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (triggerRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+
+    document.addEventListener("mousedown", onPointerDown);
+    window.addEventListener("resize", updatePosition);
+    // Capture scroll from SectionCard horizontal scroll and page scroll
+    document.addEventListener("scroll", updatePosition, true);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      window.removeEventListener("resize", updatePosition);
+      document.removeEventListener("scroll", updatePosition, true);
+    };
   }, [open]);
 
+  const menu =
+    open &&
+    menuStyle &&
+    createPortal(
+      <div ref={menuRef} className="rounded-lg overflow-hidden" style={menuStyle}>
+        {[
+          { label: "Reschedule", action: onReschedule },
+          { label: "Mark as Done", action: onMarkDone },
+          { label: "View Lead", action: onViewLead },
+        ].map(({ label, action }) => (
+          <button
+            key={label}
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              action();
+              setOpen(false);
+            }}
+            className="w-full text-left px-4 py-2.5"
+            style={{ fontSize: 13, color: "#374151" }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.background = "#F9FAFB";
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>,
+      document.body,
+    );
+
   return (
-    <div ref={ref} className="relative">
+    <div className="relative">
       <button
-        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+        ref={triggerRef}
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
         className="flex items-center justify-center rounded-lg"
         style={{ width: 32, height: 32, color: "#9CA3AF", background: open ? "#F3F4F6" : "transparent" }}
-        onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#F3F4F6"; }}
-        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = open ? "#F3F4F6" : "transparent"; }}
+        onMouseEnter={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.background = "#F3F4F6";
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.background = open ? "#F3F4F6" : "transparent";
+        }}
       >
         <KebabIcon />
       </button>
-      {open && (
-        <div
-          className="absolute right-0 z-30 rounded-lg overflow-hidden"
-          style={{ top: "calc(100% + 4px)", minWidth: 160, background: "#FFFFFF", boxShadow: "0 4px 16px rgba(15,27,60,0.12)", border: "1px solid #E3E7EF" }}
-        >
-          {[
-            { label: "Reschedule", action: onReschedule },
-            { label: "Mark as Done", action: onMarkDone },
-            { label: "View Lead", action: onViewLead },
-          ].map(({ label, action }) => (
-            <button
-              key={label}
-              onClick={(e) => { e.stopPropagation(); action(); setOpen(false); }}
-              className="w-full text-left px-4 py-2.5"
-              style={{ fontSize: 13, color: "#374151" }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#F9FAFB"; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      )}
+      {menu}
     </div>
   );
 }
