@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useRef, useEffect, useMemo, type ReactNode } from "react";
+import { useState, useRef, useEffect, useMemo, type ReactNode, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import type { UserRole } from "@/lib/types";
 import { type ApiLead, localDateKey, urgencyFor } from "@/lib/lead-ui";
@@ -192,6 +193,10 @@ function UserIcon() {
 
 // ─── Kebab Menu ───────────────────────────────────────────────────────────────
 
+const KEBAB_MENU_MIN_WIDTH = 160;
+/** Approximate menu height: 3 items × ~40px */
+const KEBAB_MENU_EST_HEIGHT = 120;
+
 function KebabMenu({
   onReschedule,
   onMarkDone,
@@ -202,51 +207,109 @@ function KebabMenu({
   onViewLead: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const [menuStyle, setMenuStyle] = useState<CSSProperties | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    if (!open) {
+      setMenuStyle(null);
+      return;
+    }
+
+    const updatePosition = () => {
+      const trigger = triggerRef.current;
+      if (!trigger) return;
+      const rect = trigger.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const openUpward = spaceBelow < KEBAB_MENU_EST_HEIGHT + 8 && rect.top > spaceBelow;
+      setMenuStyle({
+        position: "fixed",
+        top: openUpward ? undefined : rect.bottom + 4,
+        bottom: openUpward ? window.innerHeight - rect.top + 4 : undefined,
+        left: Math.max(8, rect.right - KEBAB_MENU_MIN_WIDTH),
+        minWidth: KEBAB_MENU_MIN_WIDTH,
+        zIndex: 50,
+        background: "#FFFFFF",
+        boxShadow: "0 4px 16px rgba(15,27,60,0.12)",
+        border: "1px solid #E3E7EF",
+      });
     };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+
+    updatePosition();
+
+    const onPointerDown = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (triggerRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+
+    document.addEventListener("mousedown", onPointerDown);
+    window.addEventListener("resize", updatePosition);
+    // Capture scroll from SectionCard horizontal scroll and page scroll
+    document.addEventListener("scroll", updatePosition, true);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      window.removeEventListener("resize", updatePosition);
+      document.removeEventListener("scroll", updatePosition, true);
+    };
   }, [open]);
 
+  const menu =
+    open &&
+    menuStyle &&
+    createPortal(
+      <div ref={menuRef} className="rounded-lg overflow-hidden" style={menuStyle}>
+        {[
+          { label: "Reschedule", action: onReschedule },
+          { label: "Mark as Done", action: onMarkDone },
+          { label: "View Lead", action: onViewLead },
+        ].map(({ label, action }) => (
+          <button
+            key={label}
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              action();
+              setOpen(false);
+            }}
+            className="w-full text-left px-4 py-2.5"
+            style={{ fontSize: 13, color: "#374151" }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.background = "#F9FAFB";
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>,
+      document.body,
+    );
+
   return (
-    <div ref={ref} className="relative">
+    <div className="relative">
       <button
-        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+        ref={triggerRef}
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
         className="flex items-center justify-center rounded-lg"
         style={{ width: 32, height: 32, color: "#9CA3AF", background: open ? "#F3F4F6" : "transparent" }}
-        onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#F3F4F6"; }}
-        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = open ? "#F3F4F6" : "transparent"; }}
+        onMouseEnter={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.background = "#F3F4F6";
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.background = open ? "#F3F4F6" : "transparent";
+        }}
       >
         <KebabIcon />
       </button>
-      {open && (
-        <div
-          className="absolute right-0 z-30 rounded-lg overflow-hidden"
-          style={{ top: "calc(100% + 4px)", minWidth: 160, background: "#FFFFFF", boxShadow: "0 4px 16px rgba(15,27,60,0.12)", border: "1px solid #E3E7EF" }}
-        >
-          {[
-            { label: "Reschedule", action: onReschedule },
-            { label: "Mark as Done", action: onMarkDone },
-            { label: "View Lead", action: onViewLead },
-          ].map(({ label, action }) => (
-            <button
-              key={label}
-              onClick={(e) => { e.stopPropagation(); action(); setOpen(false); }}
-              className="w-full text-left px-4 py-2.5"
-              style={{ fontSize: 13, color: "#374151" }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#F9FAFB"; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      )}
+      {menu}
     </div>
   );
 }
@@ -302,16 +365,16 @@ function FollowUpRow({
       </div>
 
       {/* Company + niche */}
-      <div style={{ flex: "0 0 240px" }}>
-        <p style={{ fontSize: 13, fontWeight: 600, color: "#111111", marginBottom: 1 }}>{lead.company}</p>
-        <p className="flex items-center gap-1.5" style={{ fontSize: 11, color: "#6B7280" }}>
-          <span>{lead.niche}</span>
-          <span className="px-1.5 py-0.5 rounded-full" style={{ background: `${color}22`, color, fontWeight: 600 }}>
+      <div style={{ flex: "0 0 240px", minWidth: 0, maxWidth: 240, overflow: "hidden" }}>
+        <p style={{ fontSize: 13, fontWeight: 600, color: "#111111", marginBottom: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{lead.company}</p>
+        <p className="flex items-center gap-1.5" style={{ fontSize: 11, color: "#6B7280", minWidth: 0 }}>
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{lead.niche}</span>
+          <span className="px-1.5 py-0.5 rounded-full shrink-0" style={{ background: `${color}22`, color, fontWeight: 600 }}>
             {lead.stage}
           </span>
         </p>
         {lead.notes && (
-          <p style={{ fontSize: 11, color: "#374151", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{lead.notes}</p>
+          <p title={lead.notes} style={{ fontSize: 11, color: "#374151", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{lead.notes}</p>
         )}
       </div>
 
@@ -420,6 +483,71 @@ function SectionHeader({
         {count}
       </span>
     </div>
+  );
+}
+
+function groupFollowUpsByDate(list: FollowUp[]) {
+  const map: Record<string, FollowUp[]> = {};
+  for (const item of list) {
+    if (!map[item.date]) map[item.date] = [];
+    map[item.date].push(item);
+  }
+  return map;
+}
+
+type MeetingRowProps = {
+  lead: FollowUp;
+  onClick: () => void;
+  onCall: () => void;
+  onReschedule: () => void;
+  onMarkDone: () => void;
+};
+
+function MeetingDateGroups({
+  dates,
+  byDate,
+  rowProps,
+  rowVariant,
+  countBg = "#E3F7F5",
+  countColor = "#0E7A70",
+  startBorder = false,
+}: {
+  dates: string[];
+  byDate: Record<string, FollowUp[]>;
+  rowProps: (lead: FollowUp) => MeetingRowProps;
+  rowVariant: "overdue" | "upcoming";
+  countBg?: string;
+  countColor?: string;
+  startBorder?: boolean;
+}) {
+  return (
+    <>
+      {dates.map((date, di) => (
+        <div key={date}>
+          <div
+            className="px-5 py-2.5 flex items-center gap-2"
+            style={{
+              background: "#F9FAFB",
+              borderBottom: "1px solid #F3F4F6",
+              borderTop: di > 0 || startBorder ? "1px solid #E3E7EF" : undefined,
+            }}
+          >
+            <span style={{ fontSize: 11, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.07em" }}>
+              {dateSectionLabel(date)}
+            </span>
+            <span
+              className="flex items-center justify-center rounded-full"
+              style={{ width: 18, height: 18, background: countBg, color: countColor, fontSize: 10, fontWeight: 700 }}
+            >
+              {byDate[date].length}
+            </span>
+          </div>
+          {byDate[date].map((lead) => (
+            <FollowUpRow key={lead.id} variant={rowVariant} {...rowProps(lead)} />
+          ))}
+        </div>
+      ))}
+    </>
   );
 }
 
@@ -620,9 +748,23 @@ export function FollowUps({ role }: { role: UserRole }) {
     }
   };
 
-  const meetings = items
-    .filter((item) => item.lastOutcome === "meeting_set")
+  const todayKey = localDateKey(new Date());
+  const allMeetings = items.filter((item) => item.lastOutcome === "meeting_set");
+  const meetingToday = allMeetings
+    .filter((m) => m.date === todayKey)
+    .sort((a, b) => a.time.localeCompare(b.time));
+  const meetingFuture = allMeetings
+    .filter((m) => m.date > todayKey)
     .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  const meetingPast = allMeetings
+    .filter((m) => m.date < todayKey)
+    .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  const meetingFutureByDate = groupFollowUpsByDate(meetingFuture);
+  const meetingPastByDate = groupFollowUpsByDate(meetingPast);
+  const meetingFutureDates = Object.keys(meetingFutureByDate).sort();
+  const meetingPastDates = Object.keys(meetingPastByDate).sort().reverse();
+  const meetingsCount = meetingToday.length + meetingFuture.length + meetingPast.length;
+
   const nonMeetingItems = items.filter((item) => item.lastOutcome !== "meeting_set");
   const todays = nonMeetingItems.filter((f) => f.urgency === "today").sort((a, b) => a.time.localeCompare(b.time));
   const missed = nonMeetingItems.filter((f) => f.urgency === "overdue").sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
@@ -636,7 +778,7 @@ export function FollowUps({ role }: { role: UserRole }) {
   }
   const upcomingDates = Object.keys(upcomingByDate).sort();
 
-  const rowProps = (lead: FollowUp) => ({
+  const rowProps = (lead: FollowUp): MeetingRowProps => ({
     lead,
     onClick: () => openLeadDetails(lead),
     onCall: () => setCallLead(lead),
@@ -719,16 +861,36 @@ export function FollowUps({ role }: { role: UserRole }) {
         )}
       </SectionCard>
 
-      {/* ── Section 4: Meetings */}
+      {/* ── Section 4: Meetings — today → future (by day) → past (by day) */}
       <SectionCard id="meetings" accentLeft="#F59E0B">
-        <SectionHeader title="Follow-up Meetings" count={meetings.length} accentColor="#B45309" />
-        {meetings.length === 0 ? (
+        <SectionHeader title="Follow-up Meetings" count={meetingsCount} accentColor="#B45309" />
+        {meetingsCount === 0 ? (
           <EmptyState message="No follow-up meetings scheduled." />
         ) : (
           <div>
-            {meetings.map((lead) => (
-              <FollowUpRow key={lead.id} variant={lead.urgency === "overdue" ? "overdue" : "today"} {...rowProps(lead)} />
+            {meetingToday.map((lead) => (
+              <FollowUpRow
+                key={lead.id}
+                variant={lead.urgency === "overdue" ? "overdue" : "today"}
+                {...rowProps(lead)}
+              />
             ))}
+            <MeetingDateGroups
+              dates={meetingFutureDates}
+              byDate={meetingFutureByDate}
+              rowProps={rowProps}
+              rowVariant="upcoming"
+              startBorder={meetingToday.length > 0}
+            />
+            <MeetingDateGroups
+              dates={meetingPastDates}
+              byDate={meetingPastByDate}
+              rowProps={rowProps}
+              rowVariant="overdue"
+              countBg="#FEF2F2"
+              countColor="#DC2626"
+              startBorder={meetingToday.length > 0 || meetingFutureDates.length > 0}
+            />
           </div>
         )}
       </SectionCard>

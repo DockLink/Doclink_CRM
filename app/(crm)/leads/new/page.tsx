@@ -20,7 +20,7 @@ export default function AddLeadPage() {
     >
       <AddLeadModal
         role={role}
-        onClose={(created) => router.push(created ? "/pipeline/list?goToLastPage=1" : "/pipeline/list")}
+        onClose={() => router.push("/pipeline/list")}
       />
     </div>
   );

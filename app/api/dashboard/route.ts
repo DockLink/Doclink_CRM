@@ -225,7 +225,15 @@ export async function GET(request: Request) {
   missedFollowUps.sort(byDateThenTime);
   todayFollowUps.sort(byDateThenTime);
   upcomingFollowUps.sort(byDateThenTime);
-  meetingFollowUps.sort(byDateThenTime);
+  // Meetings: today → future → past (so yesterday doesn't crowd the top 5)
+  meetingFollowUps.sort((a, b) => {
+    const aKey = dateKey(a.followUpDate as Date);
+    const bKey = dateKey(b.followUpDate as Date);
+    const bucket = (key: string) => (key === todayKey ? 0 : key > todayKey ? 1 : 2);
+    const bucketDiff = bucket(aKey) - bucket(bKey);
+    if (bucketDiff !== 0) return bucketDiff;
+    return byDateThenTime(a, b);
+  });
 
   // ─── Pipeline health ───────────────────────────────────────────────────
   const pipelineByStage = stages

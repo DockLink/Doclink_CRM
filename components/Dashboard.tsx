@@ -44,6 +44,16 @@ function fmtRelativeDay(dateStr: string | null) {
   return target.toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
 }
 
+function isPastMeeting(dateStr: string | null) {
+  if (!dateStr) return false;
+  const target = new Date(dateStr);
+  if (Number.isNaN(target.getTime())) return false;
+  target.setHours(0, 0, 0, 0);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return target.getTime() < today.getTime();
+}
+
 // ─── Shared small components ───────────────────────────────────────────────
 
 function StagePill({ stage }: { stage: string }) {
@@ -108,155 +118,247 @@ function EmptyRow({ label }: { label: string }) {
 
 // ─── Section 1: Follow-up summary ─────────────────────────────────────────────
 
-function TodayFollowupsCard({ items }: { items: DashboardFollowUp[] }) {
+const FOLLOWUP_CARD_VISIBLE = 5;
+const MEETINGS_CARD_VISIBLE = 4;
+// py-2.5 + company + contact + border — keep body tall enough that 5 rows are never clipped
+const FOLLOWUP_CARD_ROW_HEIGHT = 58;
+const FOLLOWUP_CARD_BODY_HEIGHT = FOLLOWUP_CARD_VISIBLE * FOLLOWUP_CARD_ROW_HEIGHT;
+const FOLLOWUP_CARD_FOOTER_HEIGHT = 28;
+
+function FollowUpSummaryCard({
+  title,
+  titleColor = "#111111",
+  section,
+  accentLeft,
+  body,
+  footer,
+}: {
+  title: ReactNode;
+  titleColor?: string;
+  section: "today" | "missed" | "upcoming" | "meetings";
+  accentLeft?: string;
+  body: ReactNode;
+  footer: ReactNode;
+}) {
   return (
-    <Card style={{ padding: "16px 20px", flex: 1, minWidth: 0 }}>
-      <div className="flex items-center justify-between mb-3">
-        <h3 style={{ fontSize: 14, fontWeight: 600, color: "#111111" }}>Today&apos;s Follow-ups</h3>
-        <ViewAllLink section="today" />
+    <Card
+      style={{
+        padding: "16px 20px",
+        flex: 1,
+        minWidth: 0,
+        display: "flex",
+        flexDirection: "column",
+        borderLeft: accentLeft ? `3px solid ${accentLeft}` : undefined,
+      }}
+    >
+      <div className="flex items-center justify-between mb-3 shrink-0">
+        <h3 style={{ fontSize: 14, fontWeight: 600, color: titleColor }}>{title}</h3>
+        <ViewAllLink section={section} />
       </div>
-      <div className="flex flex-col">
-        {items.length === 0 && <EmptyRow label="No follow-ups scheduled for today." />}
-        {items.map((item) => (
-          <div key={item.id}
-            className="flex items-center gap-3 py-2.5 transition-colors"
-            style={{ borderTop: "1px solid #F3F4F6", cursor: "default" }}
-            onMouseEnter={(e) => ((e.currentTarget as HTMLDivElement).style.background = "#F9FAFB")}
-            onMouseLeave={(e) => ((e.currentTarget as HTMLDivElement).style.background = "transparent")}
-          >
-            <span
-              className="shrink-0 px-1.5 py-0.5 rounded"
-              style={{ fontSize: 11, fontWeight: 600, color: "#B45309", background: "#FEF3C7", minWidth: 44, textAlign: "center" }}
-            >
-              {fmtTime(item.followUpTime)}
-            </span>
-            <div className="flex-1 min-w-0">
-              <div style={{ fontSize: 13, fontWeight: 500, color: "#111111" }} className="truncate">{item.company}</div>
-              <div style={{ fontSize: 11, color: "#9CA3AF" }}>{item.contact}</div>
-            </div>
-            <StagePill stage={item.stage} />
-          </div>
-        ))}
+      <div className="flex flex-col" style={{ height: FOLLOWUP_CARD_BODY_HEIGHT, overflow: "hidden" }}>
+        {body}
+      </div>
+      <div
+        className="flex items-center"
+        style={{ height: FOLLOWUP_CARD_FOOTER_HEIGHT, marginTop: 8, flexShrink: 0 }}
+      >
+        {footer}
       </div>
     </Card>
   );
 }
 
-function MissedFollowupsCard({ items }: { items: DashboardFollowUp[] }) {
+function moreItemsFooter(
+  count: number,
+  noun: "follow-ups" | "meetings",
+  visible = FOLLOWUP_CARD_VISIBLE,
+) {
+  if (count <= visible) return null;
   return (
-    <Card
-      style={{ padding: "16px 20px", flex: 1, minWidth: 0, borderLeft: "3px solid #DC2626" }}
-    >
-      <div className="flex items-center justify-between mb-3">
-        <h3 style={{ fontSize: 14, fontWeight: 600, color: "#DC2626" }}>Missed Follow-ups</h3>
-        <ViewAllLink section="missed" />
-      </div>
-      <div className="flex flex-col">
-        {items.length === 0 && <EmptyRow label="No missed follow-ups." />}
-        {items.map((item) => (
-          <div key={item.id}
-            className="flex items-center gap-3 py-2.5 transition-colors"
-            style={{ borderTop: "1px solid #F3F4F6" }}
-            onMouseEnter={(e) => ((e.currentTarget as HTMLDivElement).style.background = "#FFF8F8")}
-            onMouseLeave={(e) => ((e.currentTarget as HTMLDivElement).style.background = "transparent")}
-          >
-            <span
-              className="shrink-0 px-1.5 py-0.5 rounded"
-              style={{ fontSize: 11, fontWeight: 600, color: "#DC2626", background: "#FEF2F2", minWidth: 44, textAlign: "center" }}
+    <div style={{ fontSize: 11, color: "#9CA3AF" }}>
+      +{count - visible} more {noun}
+    </div>
+  );
+}
+
+function TodayFollowupsCard({ items }: { items: DashboardFollowUp[] }) {
+  return (
+    <FollowUpSummaryCard
+      title="Today's Follow-ups"
+      section="today"
+      body={
+        <>
+          {items.length === 0 && <EmptyRow label="No follow-ups scheduled for today." />}
+          {items.slice(0, FOLLOWUP_CARD_VISIBLE).map((item) => (
+            <div
+              key={item.id}
+              className="flex items-center gap-3 py-2.5 transition-colors"
+              style={{ borderTop: "1px solid #F3F4F6", cursor: "default" }}
+              onMouseEnter={(e) => ((e.currentTarget as HTMLDivElement).style.background = "#F9FAFB")}
+              onMouseLeave={(e) => ((e.currentTarget as HTMLDivElement).style.background = "transparent")}
             >
-              {fmtRelativeDay(item.followUpDate) === "Today" ? fmtTime(item.followUpTime) : fmtRelativeDay(item.followUpDate)}
-            </span>
-            <div className="flex-1 min-w-0">
-              <div style={{ fontSize: 13, fontWeight: 500, color: "#111111" }} className="truncate">{item.company}</div>
-              <div style={{ fontSize: 11, color: "#9CA3AF" }}>{item.contact}</div>
+              <span
+                className="shrink-0 px-1.5 py-0.5 rounded"
+                style={{ fontSize: 11, fontWeight: 600, color: "#B45309", background: "#FEF3C7", minWidth: 44, textAlign: "center" }}
+              >
+                {fmtTime(item.followUpTime)}
+              </span>
+              <div className="flex-1 min-w-0">
+                <div style={{ fontSize: 13, fontWeight: 500, color: "#111111" }} className="truncate">{item.company}</div>
+                <div style={{ fontSize: 11, color: "#9CA3AF" }}>{item.contact}</div>
+              </div>
+              <StagePill stage={item.stage} />
             </div>
-            <StagePill stage={item.stage} />
-          </div>
-        ))}
-      </div>
-      {items.length > 0 && (
-        <div className="mt-3 pt-3" style={{ borderTop: "1px solid #F3F4F6" }}>
-          <div style={{ fontSize: 12, color: "#DC2626", fontWeight: 500 }}>
+          ))}
+        </>
+      }
+      footer={moreItemsFooter(items.length, "follow-ups")}
+    />
+  );
+}
+
+function MissedFollowupsCard({ items }: { items: DashboardFollowUp[] }) {
+  const footer =
+    items.length > FOLLOWUP_CARD_VISIBLE
+      ? moreItemsFooter(items.length, "follow-ups")
+      : items.length > 0
+        ? (
+          <div style={{ fontSize: 11, color: "#DC2626", fontWeight: 500 }} className="truncate">
             {items.length} overdue — action required
           </div>
-        </div>
-      )}
-    </Card>
+        )
+        : null;
+
+  return (
+    <FollowUpSummaryCard
+      title="Missed Follow-ups"
+      titleColor="#DC2626"
+      section="missed"
+      accentLeft="#DC2626"
+      body={
+        <>
+          {items.length === 0 && <EmptyRow label="No missed follow-ups." />}
+          {items.slice(0, FOLLOWUP_CARD_VISIBLE).map((item) => (
+            <div
+              key={item.id}
+              className="flex items-center gap-3 py-2.5 transition-colors"
+              style={{ borderTop: "1px solid #F3F4F6" }}
+              onMouseEnter={(e) => ((e.currentTarget as HTMLDivElement).style.background = "#FFF8F8")}
+              onMouseLeave={(e) => ((e.currentTarget as HTMLDivElement).style.background = "transparent")}
+            >
+              <span
+                className="shrink-0 px-1.5 py-0.5 rounded"
+                style={{ fontSize: 11, fontWeight: 600, color: "#DC2626", background: "#FEF2F2", minWidth: 44, textAlign: "center" }}
+              >
+                {fmtRelativeDay(item.followUpDate) === "Today" ? fmtTime(item.followUpTime) : fmtRelativeDay(item.followUpDate)}
+              </span>
+              <div className="flex-1 min-w-0">
+                <div style={{ fontSize: 13, fontWeight: 500, color: "#111111" }} className="truncate">{item.company}</div>
+                <div style={{ fontSize: 11, color: "#9CA3AF" }}>{item.contact}</div>
+              </div>
+              <StagePill stage={item.stage} />
+            </div>
+          ))}
+        </>
+      }
+      footer={footer}
+    />
   );
 }
 
 function UpcomingFollowupsCard({ items }: { items: DashboardFollowUp[] }) {
   return (
-    <Card style={{ padding: "16px 20px", flex: 1, minWidth: 0 }}>
-      <div className="flex items-center justify-between mb-3">
-        <h3 style={{ fontSize: 14, fontWeight: 600, color: "#111111" }}>
+    <FollowUpSummaryCard
+      title={
+        <>
           Upcoming Follow-ups <span style={{ fontWeight: 400, color: "#9CA3AF", fontSize: 12 }}>— next 7 days</span>
-        </h3>
-        <ViewAllLink section="upcoming" />
-      </div>
-      <div className="flex flex-col">
-        {items.length === 0 && <EmptyRow label="Nothing coming up in the next 7 days." />}
-        {items.map((item) => (
-          <div key={item.id}
-            className="flex items-center gap-3 py-2.5 transition-colors"
-            style={{ borderTop: "1px solid #F3F4F6" }}
-            onMouseEnter={(e) => ((e.currentTarget as HTMLDivElement).style.background = "#E3F7F5")}
-            onMouseLeave={(e) => ((e.currentTarget as HTMLDivElement).style.background = "transparent")}
-          >
-            <span
-              className="shrink-0 px-1.5 py-0.5 rounded"
-              style={{ fontSize: 11, fontWeight: 500, color: "#0E7A70", background: "#E3F7F5", minWidth: 44, textAlign: "center" }}
+        </>
+      }
+      section="upcoming"
+      body={
+        <>
+          {items.length === 0 && <EmptyRow label="Nothing coming up in the next 7 days." />}
+          {items.slice(0, FOLLOWUP_CARD_VISIBLE).map((item) => (
+            <div
+              key={item.id}
+              className="flex items-center gap-3 py-2.5 transition-colors"
+              style={{ borderTop: "1px solid #F3F4F6" }}
+              onMouseEnter={(e) => ((e.currentTarget as HTMLDivElement).style.background = "#E3F7F5")}
+              onMouseLeave={(e) => ((e.currentTarget as HTMLDivElement).style.background = "transparent")}
             >
-              {fmtRelativeDay(item.followUpDate)}
-            </span>
-            <div className="flex-1 min-w-0">
-              <div style={{ fontSize: 13, fontWeight: 500, color: "#111111" }} className="truncate">{item.company}</div>
-              <div style={{ fontSize: 11, color: "#9CA3AF" }}>{item.contact}</div>
+              <span
+                className="shrink-0 px-1.5 py-0.5 rounded"
+                style={{ fontSize: 11, fontWeight: 500, color: "#0E7A70", background: "#E3F7F5", minWidth: 44, textAlign: "center" }}
+              >
+                {fmtRelativeDay(item.followUpDate)}
+              </span>
+              <div className="flex-1 min-w-0">
+                <div style={{ fontSize: 13, fontWeight: 500, color: "#111111" }} className="truncate">{item.company}</div>
+                <div style={{ fontSize: 11, color: "#9CA3AF" }}>{item.contact}</div>
+              </div>
+              <StagePill stage={item.stage} />
             </div>
-            <StagePill stage={item.stage} />
-          </div>
-        ))}
-      </div>
-    </Card>
+          ))}
+        </>
+      }
+      footer={moreItemsFooter(items.length, "follow-ups")}
+    />
   );
 }
 
 function MeetingsCard({ items }: { items: DashboardFollowUp[] }) {
   const router = useRouter();
+  // API order is today → future → past; show all three, overflow via +N
 
   return (
-    <Card style={{ padding: "16px 20px", flex: 1, minWidth: 0, borderLeft: "3px solid #F59E0B" }}>
-      <div className="flex items-center justify-between mb-3">
-        <h3 style={{ fontSize: 14, fontWeight: 600, color: "#B45309" }}>Upcoming Meetings</h3>
-        <ViewAllLink section="meetings" />
-      </div>
-      <div className="flex flex-col">
-        {items.length === 0 && <EmptyRow label="No follow-up meetings scheduled." />}
-        {items.slice(0, 5).map((item) => (
-          <div
-            key={item.id}
-            className="flex items-center gap-3 py-2.5 transition-colors"
-            style={{ borderTop: "1px solid #F3F4F6", cursor: "pointer" }}
-            onClick={() => router.push(`/leads/${item.id}`)}
-            onMouseEnter={(e) => ((e.currentTarget as HTMLDivElement).style.background = "#FFFBEB")}
-            onMouseLeave={(e) => ((e.currentTarget as HTMLDivElement).style.background = "transparent")}
-          >
-            <span
-              className="shrink-0 px-1.5 py-0.5 rounded"
-              style={{ fontSize: 11, fontWeight: 600, color: "#B45309", background: "#FEF3C7", minWidth: 44, textAlign: "center" }}
-            >
-              {fmtRelativeDay(item.followUpDate)}
-            </span>
-            <div className="flex-1 min-w-0">
-              <div style={{ fontSize: 13, fontWeight: 500, color: "#111111" }} className="truncate">{item.company}</div>
-              <div style={{ fontSize: 11, color: "#9CA3AF" }}>{fmtTime(item.followUpTime)} · {item.contact}</div>
-            </div>
-            <StagePill stage={item.stage} />
-          </div>
-        ))}
-      </div>
-      {items.length > 5 && <div className="mt-2" style={{ fontSize: 11, color: "#9CA3AF" }}>+{items.length - 5} more meetings</div>}
-    </Card>
+    <FollowUpSummaryCard
+      title="Upcoming Meetings"
+      titleColor="#B45309"
+      section="meetings"
+      accentLeft="#F59E0B"
+      body={
+        <>
+          {items.length === 0 && <EmptyRow label="No follow-up meetings scheduled." />}
+          {items.slice(0, MEETINGS_CARD_VISIBLE).map((item) => {
+            const missed = isPastMeeting(item.followUpDate);
+            return (
+              <div
+                key={item.id}
+                className="flex items-center gap-3 py-2.5 transition-colors"
+                style={{ borderTop: "1px solid #F3F4F6", cursor: "pointer" }}
+                onClick={() => router.push(`/leads/${item.id}`)}
+                onMouseEnter={(e) => ((e.currentTarget as HTMLDivElement).style.background = missed ? "#FFF8F8" : "#FFFBEB")}
+                onMouseLeave={(e) => ((e.currentTarget as HTMLDivElement).style.background = "transparent")}
+              >
+                <span
+                  className="shrink-0 px-1.5 py-0.5 rounded"
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: missed ? "#DC2626" : "#B45309",
+                    background: missed ? "#FEF2F2" : "#FEF3C7",
+                    minWidth: 44,
+                    textAlign: "center",
+                  }}
+                >
+                  {fmtRelativeDay(item.followUpDate) === "Today"
+                    ? fmtTime(item.followUpTime)
+                    : fmtRelativeDay(item.followUpDate)}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <div style={{ fontSize: 13, fontWeight: 500, color: "#111111" }} className="truncate">{item.company}</div>
+                  <div style={{ fontSize: 11, color: missed ? "#DC2626" : "#9CA3AF" }}>
+                    {missed ? "Missed · " : ""}{fmtTime(item.followUpTime)} · {item.contact}
+                  </div>
+                </div>
+                <StagePill stage={item.stage} />
+              </div>
+            );
+          })}
+        </>
+      }
+      footer={moreItemsFooter(items.length, "meetings", MEETINGS_CARD_VISIBLE)}
+    />
   );
 }
 
