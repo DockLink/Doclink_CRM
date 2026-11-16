@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { CLOSED_LOST_OUTCOME, lostReasonCategory } from "@/lib/lost-reasons";
 import { leadAccessWhere, requireProfile, checkRateLimit } from "@/lib/api-auth";
+import { resolveDisplayFollowUp } from "@/lib/lead-ui";
 import { Prisma } from "../../../generated/prisma/client"; // adjust relative depth if this file moves
 
 // ─── Stage name constants ──────────────────────────────────────────────────
@@ -22,12 +23,14 @@ function startOfDay(d: Date) {
 
 // follow_up_date (DATE) and follow_up_time (TIME) hold the user's wall-clock
 // values, surfaced by Prisma as UTC-midnight / 1970-01-01 UTC instants.
-function dateKey(d: Date) {
-  return d.toISOString().slice(0, 10);
+function dateKey(d: Date | string) {
+  return (d instanceof Date ? d : new Date(d)).toISOString().slice(0, 10);
 }
 
-function timeMinutes(t: Date | null) {
-  return t ? t.getUTCHours() * 60 + t.getUTCMinutes() : null;
+function timeMinutes(t: Date | string | null) {
+  if (!t) return null;
+  const value = t instanceof Date ? t : new Date(t);
+  return Number.isNaN(value.getTime()) ? null : value.getUTCHours() * 60 + value.getUTCMinutes();
 }
 
 // Shifts `now` into the caller's wall clock using the browser's
@@ -67,6 +70,10 @@ const followUpLeadSelect = {
   stageId: true,
   followUpDate: true,
   followUpTime: true,
+  followUpUpdatedAt: true,
+  proposalFollowUpDate: true,
+  proposalFollowUpTime: true,
+  proposalFollowUpUpdatedAt: true,
   activities: {
     orderBy: { createdAt: "desc" as const },
     take: 1,
@@ -124,7 +131,10 @@ export async function GET(request: Request) {
     prisma.lead.findMany({
       where: {
         ...leadAccessWhere(profile),
-        followUpDate: { lte: new Date(in7Days.getTime() + 2 * DAY_MS) },
+        OR: [
+          { followUpDate: { lte: new Date(in7Days.getTime() + 2 * DAY_MS) } },
+          { proposalFollowUpDate: { lte: new Date(in7Days.getTime() + 2 * DAY_MS) } },
+        ],
         stage: { name: { notIn: CLOSED_STAGE_NAMES } },
       },
       select: followUpLeadSelect,
@@ -205,30 +215,36 @@ export async function GET(request: Request) {
   const nowMinutes = timeMinutes(wallClock) as number;
   const meetingFollowUps: FollowUpLead[] = [];
   for (const lead of followUpLeads) {
+    const display = resolveDisplayFollowUp(lead);
+    if (!display.date) continue;
     if (lead.activities[0]?.outcome === "meeting_set") {
       meetingFollowUps.push(lead);
       continue;
     }
-    const key = dateKey(lead.followUpDate as Date);
+    const key = dateKey(display.date);
     if (key < todayKey) missedFollowUps.push(lead);
     else if (key === todayKey) {
-      const minutes = timeMinutes(lead.followUpTime);
+      const minutes = timeMinutes(display.time);
       if (minutes !== null && minutes < nowMinutes) missedFollowUps.push(lead);
       else todayFollowUps.push(lead);
     }
     else if (key <= horizonKey) upcomingFollowUps.push(lead);
   }
 
-  const byDateThenTime = (a: FollowUpLead, b: FollowUpLead) =>
-    (a.followUpDate as Date).getTime() - (b.followUpDate as Date).getTime() ||
-    (timeMinutes(a.followUpTime) ?? 0) - (timeMinutes(b.followUpTime) ?? 0);
+  const byDateThenTime = (a: FollowUpLead, b: FollowUpLead) => {
+    const aDisplay = resolveDisplayFollowUp(a);
+    const bDisplay = resolveDisplayFollowUp(b);
+    const aDate = aDisplay.date ? new Date(aDisplay.date).getTime() : 0;
+    const bDate = bDisplay.date ? new Date(bDisplay.date).getTime() : 0;
+    return aDate - bDate || (timeMinutes(aDisplay.time) ?? 0) - (timeMinutes(bDisplay.time) ?? 0);
+  };
   missedFollowUps.sort(byDateThenTime);
   todayFollowUps.sort(byDateThenTime);
   upcomingFollowUps.sort(byDateThenTime);
   // Meetings: today → future → past (so yesterday doesn't crowd the top 5)
   meetingFollowUps.sort((a, b) => {
-    const aKey = dateKey(a.followUpDate as Date);
-    const bKey = dateKey(b.followUpDate as Date);
+    const aKey = dateKey(resolveDisplayFollowUp(a).date ?? todayKey);
+    const bKey = dateKey(resolveDisplayFollowUp(b).date ?? todayKey);
     const bucket = (key: string) => (key === todayKey ? 0 : key > todayKey ? 1 : 2);
     const bucketDiff = bucket(aKey) - bucket(bKey);
     if (bucketDiff !== 0) return bucketDiff;
@@ -295,14 +311,17 @@ export async function GET(request: Request) {
       .sort((a, b) => b.count - a.count);
   }
 
-  const serializeLeadForFollowUp = (lead: FollowUpLead) => ({
-    id: lead.id,
-    company: lead.company,
-    contact: lead.contact ?? "—",
-    stage: stageNameById.get(lead.stageId) ?? "",
-    followUpDate: lead.followUpDate,
-    followUpTime: lead.followUpTime,
-  });
+  const serializeLeadForFollowUp = (lead: FollowUpLead) => {
+    const display = resolveDisplayFollowUp(lead);
+    return {
+      id: lead.id,
+      company: lead.company,
+      contact: lead.contact ?? "—",
+      stage: stageNameById.get(lead.stageId) ?? "",
+      followUpDate: display.date,
+      followUpTime: display.time,
+    };
+  };
 
   return NextResponse.json({
     role: profile.role,

@@ -68,13 +68,16 @@ export async function POST(request: Request) {
     const created = await transaction.activity.create({
       data: { leadId, outcome, notes: body.notes?.trim() || undefined, loggedBy: profile.id },
     });
+    const now = new Date();
+    const touchingFollowUp = Boolean(followUpDate || followUpTime || clearFollowUp);
     await transaction.lead.update({
       where: { id: leadId },
       data: {
-        lastActivityAt: new Date(),
+        lastActivityAt: now,
         ...(followUpDate ? { followUpDate } : {}),
         ...(followUpTime ? { followUpTime } : {}),
         ...(clearFollowUp ? { followUpDate: null, followUpTime: null } : {}),
+        ...(touchingFollowUp ? { followUpUpdatedAt: now } : {}),
       },
     });
     const calls = await transaction.activity.count({ where: { leadId, outcome: { not: CLOSED_LOST_OUTCOME } } });

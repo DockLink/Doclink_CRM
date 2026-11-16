@@ -10,7 +10,7 @@ import {
   type RevenueCurrency,
   type StandardFieldKey,
 } from "@/lib/lead-custom-fields";
-import { assigneeColor, initials, priorityForStage } from "@/lib/lead-ui";
+import { assigneeColor, formatFollowUpScheduleNote, initials, priorityForStage } from "@/lib/lead-ui";
 import { nextStageName, stageColor, type PipelineStage } from "@/lib/pipeline-stages";
 import { usePipelineStages } from "@/lib/use-pipeline-stages";
 import { clearDraft, readDraft, useFormDraft } from "@/lib/use-form-draft";
@@ -29,6 +29,7 @@ type CallOutcome =
   | "no_answer"
   | "callback_requested"
   | "proposal_discussed"
+  | "proposal_sent"
   | "meeting_set"
   | typeof CLOSED_LOST_OUTCOME;
 
@@ -67,6 +68,8 @@ interface LeadDetail {
   proposalSentAt?: string;
   followUpDate: string;
   followUpTime: string;
+  proposalFollowUpDate: string;
+  proposalFollowUpTime: string;
   notes: string;
   customFields: CustomField[];
   lastContacted: { outcome: string; relativeTime: string; note: string } | null;
@@ -79,6 +82,7 @@ type LeadUpdate = LeadDetail | ((prev: LeadDetail) => LeadDetail);
 interface LeadPatchResult {
   proposalSentDate?: string | null;
   customFields?: { id: string; value: string }[];
+  activity?: { id: string; outcome: string; notes: string; loggedBy: string; createdAt: string };
   error?: string;
 }
 
@@ -117,6 +121,7 @@ const OUTCOME_META: Record<CallOutcome, { label: string; bg: string; color: stri
   no_answer:          { label: "No Answer",           bg: "#FEF3C7", color: "#B45309" },
   callback_requested: { label: "Callback Requested",  bg: "#EDE9FE", color: "#6366F1" },
   proposal_discussed: { label: "Proposal Discussed",  bg: "#EDE9FE", color: "#6366F1" },
+  proposal_sent:      { label: "Proposal Sent",       bg: "#EDE9FE", color: "#7C3AED" },
   meeting_set:        { label: "Meeting Set",          bg: "#FEF9C3", color: "#B45309" },
   closed_lost:        { label: "Closed Lost",          bg: "#FEE2E2", color: "#B91C1C" },
 };
@@ -143,6 +148,8 @@ interface ApiLeadDetail {
   proposalSentDate: string | null;
   followUpDate: string;
   followUpTime: string;
+  proposalFollowUpDate: string;
+  proposalFollowUpTime: string;
   notes: string;
   lostReason: string | null;
   customFields: CustomField[];
@@ -167,6 +174,12 @@ function timestampLabel(iso: string) {
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+function buildActivityNotes(userNotes: string, followUpDate: string, followUpTime: string): string {
+  const base = userNotes.trim() || "No additional notes.";
+  const schedule = formatFollowUpScheduleNote(followUpDate, followUpTime);
+  return schedule ? `${base}\n\n${schedule}` : base;
 }
 
 function toActivityEntry(entry: ApiLeadDetail["activities"][number]): ActivityEntry {
@@ -199,6 +212,8 @@ function toLeadDetail(lead: ApiLeadDetail): LeadDetail {
     proposalSentAt: lead.proposalSentDate ? timestampLabel(lead.proposalSentDate) : undefined,
     followUpDate: lead.followUpDate,
     followUpTime: lead.followUpTime,
+    proposalFollowUpDate: lead.proposalFollowUpDate ?? "",
+    proposalFollowUpTime: lead.proposalFollowUpTime ?? "",
     notes: lead.notes,
     customFields: lead.customFields,
     lastContacted: latest
@@ -392,7 +407,21 @@ function HeaderKebab({
 
 // ─── Details Tab ──────────────────────────────────────────────────────────────
 
-function DetailsTab({ lead, role, stages, onLeadChange, onMarkDead }: { lead: LeadDetail; role: UserRole; stages: PipelineStage[]; onLeadChange: (update: LeadUpdate) => void; onMarkDead: () => void }) {
+function DetailsTab({
+  lead,
+  role,
+  stages,
+  onLeadChange,
+  onMarkDead,
+  onStageChange,
+}: {
+  lead: LeadDetail;
+  role: UserRole;
+  stages: PipelineStage[];
+  onLeadChange: (update: LeadUpdate) => void;
+  onMarkDead: () => void;
+  onStageChange: (stage: string) => void;
+}) {
   const notesDraftKey = leadDraftKey(lead.id, "notes");
   const [notes, setNotes] = useState(() => readDraft<string>(notesDraftKey) ?? lead.notes);
   useFormDraft(notesDraftKey, notes, { isEmpty: (value) => value === lead.notes });
@@ -435,9 +464,88 @@ function DetailsTab({ lead, role, stages, onLeadChange, onMarkDead }: { lead: Le
         ...prev,
         proposalSentAt: result.proposalSentDate ? timestampLabel(result.proposalSentDate) : undefined,
       }));
+      // Turning the toggle on advances the pipeline stage to "Proposal Sent".
+      const proposalStage = stages.find((stage) => stage.name === "Proposal Sent" && stage.active);
+      if (next && proposalStage && lead.stage !== proposalStage.name) {
+        onStageChange(proposalStage.name);
+      }
     } catch (err) {
       onLeadChange((prev) => ({ ...prev, proposalSent: !next, proposalSentAt: previousAt }));
       setCustomFieldError(err instanceof Error ? err.message : "Unable to save changes.");
+    }
+  };
+
+  const saveFollowUp = async (followUpDate: string, followUpTime: string) => {
+    if (followUpDate === lead.followUpDate && followUpTime === lead.followUpTime) return;
+    const previous = { followUpDate: lead.followUpDate, followUpTime: lead.followUpTime };
+    setCustomFieldError("");
+    onLeadChange((prev) => ({ ...prev, followUpDate, followUpTime }));
+    try {
+      await patchLead(lead.id, {
+        followUpDate: followUpDate || null,
+        followUpTime: followUpTime || null,
+      });
+    } catch (err) {
+      onLeadChange((prev) => ({ ...prev, ...previous }));
+      setCustomFieldError(err instanceof Error ? err.message : "Unable to save follow-up.");
+    }
+  };
+
+  /** Proposal Sent block: own schedule fields + single Proposal Sent activity (date+time only). */
+  const saveProposalFollowUp = async (proposalFollowUpDate: string, proposalFollowUpTime: string) => {
+    if (
+      proposalFollowUpDate === lead.proposalFollowUpDate
+      && proposalFollowUpTime === lead.proposalFollowUpTime
+    ) return;
+    const previous = {
+      proposalFollowUpDate: lead.proposalFollowUpDate,
+      proposalFollowUpTime: lead.proposalFollowUpTime,
+      activity: lead.activity,
+      lastContacted: lead.lastContacted,
+    };
+    setCustomFieldError("");
+    onLeadChange((prev) => ({ ...prev, proposalFollowUpDate, proposalFollowUpTime }));
+
+    try {
+      const result = await patchLead(lead.id, {
+        proposalFollowUpDate: proposalFollowUpDate || null,
+        proposalFollowUpTime: proposalFollowUpTime || null,
+      });
+
+      // Incomplete schedule (date without time) — fields saved, no activity yet.
+      if (!result.activity) return;
+
+      const entry: ActivityEntry = {
+        id: result.activity.id,
+        outcome: result.activity.outcome,
+        notes: result.activity.notes,
+        loggedBy: result.activity.loggedBy || "You",
+        timestamp: "Just now",
+        relativeTime: "Just now",
+      };
+      onLeadChange((prev) => {
+        const withoutProposal = prev.activity.filter((item) => item.outcome !== "proposal_sent");
+        return {
+          ...prev,
+          proposalFollowUpDate,
+          proposalFollowUpTime,
+          activity: [entry, ...withoutProposal],
+          lastContacted: {
+            outcome: "proposal_sent",
+            relativeTime: "Just now",
+            note: entry.notes,
+          },
+        };
+      });
+    } catch (err) {
+      onLeadChange((prev) => ({
+        ...prev,
+        proposalFollowUpDate: previous.proposalFollowUpDate,
+        proposalFollowUpTime: previous.proposalFollowUpTime,
+        activity: previous.activity,
+        lastContacted: previous.lastContacted,
+      }));
+      setCustomFieldError(err instanceof Error ? err.message : "Unable to save follow-up.");
     }
   };
 
@@ -476,13 +584,14 @@ function DetailsTab({ lead, role, stages, onLeadChange, onMarkDead }: { lead: Le
 
   const handleLogCallSave = async (data: LogCallForm) => {
     if (!data.outcome) return;
+    const notes = buildActivityNotes(data.notes, data.followUpDate, data.followUpTime);
     const response = await fetch("/api/activities", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         leadId: lead.id,
         outcome: data.outcome,
-        notes: data.notes,
+        notes,
         followUpDate: data.followUpDate || undefined,
         followUpTime: data.followUpTime || undefined,
       }),
@@ -497,7 +606,7 @@ function DetailsTab({ lead, role, stages, onLeadChange, onMarkDead }: { lead: Le
     const entry: ActivityEntry = {
       id: result.id,
       outcome: data.outcome,
-      notes: data.notes || "No additional notes.",
+      notes,
       loggedBy: result.loggedBy || "You",
       timestamp: "Just now",
       relativeTime: "Just now",
@@ -509,7 +618,7 @@ function DetailsTab({ lead, role, stages, onLeadChange, onMarkDead }: { lead: Le
       lastContacted: {
         outcome: data.outcome,
         relativeTime: "Just now",
-        note: data.notes || "No additional notes.",
+        note: notes,
       },
       ...(data.followUpDate
         ? { followUpDate: data.followUpDate, followUpTime: data.followUpTime }
@@ -544,30 +653,11 @@ function DetailsTab({ lead, role, stages, onLeadChange, onMarkDead }: { lead: Le
             </button>
 
             {/* Follow-up date + time */}
-            <div className="flex gap-3">
-              <div style={{ flex: 1 }}>
-                <label style={{ fontSize: 11, fontWeight: 600, color: "#6B7280", display: "block", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.06em" }}>Follow-up Date</label>
-                <input
-                  type="date"
-                  defaultValue={lead.followUpDate}
-                  className="w-full rounded-lg px-3"
-                  style={{ height: 36, border: "1.5px solid #E3E7EF", fontSize: 13, color: "#111111", outline: "none" }}
-                  onFocus={(e) => { e.currentTarget.style.borderColor = "#2FBEB3"; }}
-                  onBlur={(e) => { e.currentTarget.style.borderColor = "#E3E7EF"; }}
-                />
-              </div>
-              <div style={{ flex: 1 }}>
-                <label style={{ fontSize: 11, fontWeight: 600, color: "#6B7280", display: "block", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.06em" }}>Time</label>
-                <input
-                  type="time"
-                  defaultValue={lead.followUpTime}
-                  className="w-full rounded-lg px-3"
-                  style={{ height: 36, border: "1.5px solid #E3E7EF", fontSize: 13, color: "#111111", outline: "none" }}
-                  onFocus={(e) => { e.currentTarget.style.borderColor = "#2FBEB3"; }}
-                  onBlur={(e) => { e.currentTarget.style.borderColor = "#E3E7EF"; }}
-                />
-              </div>
-            </div>
+            <FollowUpDateTimeFields
+              date={lead.followUpDate}
+              time={lead.followUpTime}
+              onSave={(date, time) => void saveFollowUp(date, time)}
+            />
 
             {/* Priority segmented selector */}
             <div>
@@ -640,12 +730,20 @@ function DetailsTab({ lead, role, stages, onLeadChange, onMarkDead }: { lead: Le
                 <CustomFieldEditor field={cf} draftKey={leadDraftKey(lead.id, `field:${cf.id}`)} onSave={(value) => void saveCustomField(cf, value)} />
               </CustomFieldRow>
             ))}
-            <CustomFieldRow
-              label="Proposal Sent"
-              hint={lead.proposalSent && lead.proposalSentAt ? `Set ${lead.proposalSentAt}` : undefined}
-            >
-              <Toggle on={lead.proposalSent} onClick={() => void toggleProposalSent()} label="Proposal Sent" />
-            </CustomFieldRow>
+            <div className="flex flex-col gap-2">
+              <CustomFieldRow
+                label="Proposal Sent"
+                hint={lead.proposalSent && lead.proposalSentAt ? `Set ${lead.proposalSentAt}` : undefined}
+              >
+                <Toggle on={lead.proposalSent} onClick={() => void toggleProposalSent()} label="Proposal Sent" />
+              </CustomFieldRow>
+              <FollowUpDateTimeFields
+                date={lead.proposalFollowUpDate}
+                time={lead.proposalFollowUpTime}
+                onSave={(date, time) => void saveProposalFollowUp(date, time)}
+                compact
+              />
+            </div>
             {lead.customFields.filter((cf) => !cf.key).map((cf) => (
               <CustomFieldRow key={cf.id} label={cf.label}>
                 <CustomFieldEditor field={cf} draftKey={leadDraftKey(lead.id, `field:${cf.id}`)} onSave={(value) => void saveCustomField(cf, value)} />
@@ -904,6 +1002,98 @@ function CustomFieldRow({ label, hint, children }: { label: string; hint?: strin
         {hint && <p style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>{hint}</p>}
       </div>
       <div className="flex flex-1 justify-end min-w-0">{children}</div>
+    </div>
+  );
+}
+
+function FollowUpDateTimeFields({
+  date,
+  time,
+  onSave,
+  compact = false,
+}: {
+  date: string;
+  time: string;
+  onSave: (date: string, time: string) => void;
+  compact?: boolean;
+}) {
+  const [localDate, setLocalDate] = useState(date);
+  const [localTime, setLocalTime] = useState(time);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestLocal = useRef({ date, time });
+
+  useEffect(() => {
+    setLocalDate(date);
+    setLocalTime(time);
+    latestLocal.current = { date, time };
+  }, [date, time]);
+
+  useEffect(() => () => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+  }, []);
+
+  const commit = (nextDate: string, nextTime: string) => {
+    latestLocal.current = { date: nextDate, time: nextTime };
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    // Debounce so picking date then time becomes one save.
+    saveTimer.current = setTimeout(() => {
+      const { date: d, time: t } = latestLocal.current;
+      if (d === date && t === time) return;
+      onSave(d, t);
+    }, 450);
+  };
+
+  const labelStyle: CSSProperties = compact
+    ? { fontSize: 11, fontWeight: 500, color: "#9CA3AF", display: "block", marginBottom: 4 }
+    : { fontSize: 11, fontWeight: 600, color: "#6B7280", display: "block", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.06em" };
+
+  const inputStyle: CSSProperties = {
+    height: 36,
+    border: "1.5px solid #E3E7EF",
+    fontSize: 13,
+    color: "#111111",
+    outline: "none",
+    background: "#FFFFFF",
+  };
+
+  return (
+    <div className="flex gap-3">
+      <div style={{ flex: 1 }}>
+        <label style={labelStyle}>{compact ? "Follow-up date" : "Follow-up Date"}</label>
+        <input
+          type="date"
+          value={localDate}
+          onChange={(e) => setLocalDate(e.target.value)}
+          onFocus={(e) => { e.currentTarget.style.borderColor = "#2FBEB3"; }}
+          onBlur={(e) => {
+            e.currentTarget.style.borderColor = "#E3E7EF";
+            const nextDate = e.currentTarget.value;
+            setLocalDate(nextDate);
+            commit(nextDate, localTime);
+          }}
+          className="w-full rounded-lg px-3"
+          style={inputStyle}
+          aria-label="Follow-up date"
+        />
+      </div>
+      <div style={{ flex: 1 }}>
+        <label style={labelStyle}>Time</label>
+        <input
+          type="time"
+          value={localTime}
+          onChange={(e) => setLocalTime(e.target.value)}
+          onFocus={(e) => { e.currentTarget.style.borderColor = "#2FBEB3"; }}
+          onBlur={(e) => {
+            e.currentTarget.style.borderColor = "#E3E7EF";
+            const nextTime = e.currentTarget.value;
+            setLocalTime(nextTime);
+            commit(localDate, nextTime);
+          }}
+          className="w-full rounded-lg px-3"
+          style={inputStyle}
+          aria-label="Follow-up time"
+        />
+      </div>
     </div>
   );
 }
@@ -1552,7 +1742,16 @@ export function LeadDetailPanel({ role, leadId, initialTab = "details", onClose,
         {/* ── Scrollable body */}
         <div className="flex-1 overflow-y-auto" style={{ background: "#F9FAFB" }}>
           {error && <p style={{ padding: "12px 20px 0", fontSize: 13, color: "#DC2626" }}>{error}</p>}
-          {tab === "details" && <DetailsTab lead={lead} role={role} stages={stages} onLeadChange={updateLead} onMarkDead={() => requestStageChange("Dead Lead")} />}
+          {tab === "details" && (
+            <DetailsTab
+              lead={lead}
+              role={role}
+              stages={stages}
+              onLeadChange={updateLead}
+              onMarkDead={() => requestStageChange("Dead Lead")}
+              onStageChange={requestStageChange}
+            />
+          )}
           {tab === "activity" && <ActivityTab lead={lead} />}
         </div>
       </div>

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { createClient } from "@/lib/supabase/server";
 import { leadAccessWhere } from "@/lib/api-auth";
-import { priorityForStage, type LeadPriority } from "@/lib/lead-ui";
+import { priorityForStage, resolveDisplayFollowUp, type LeadPriority } from "@/lib/lead-ui";
 import { formatMonthlyRevenue, parseYesNo } from "@/lib/lead-custom-fields";
 import { ensureStandardCustomFields } from "@/lib/standard-custom-fields";
 import { CLOSED_LOST_OUTCOME } from "@/lib/lost-reasons";
@@ -31,6 +31,10 @@ const leadListSelect = {
   priority: true,
   followUpDate: true,
   followUpTime: true,
+  followUpUpdatedAt: true,
+  proposalFollowUpDate: true,
+  proposalFollowUpTime: true,
+  proposalFollowUpUpdatedAt: true,
   createdAt: true,
   stageChangedAt: true,
   stage: { select: { name: true } },
@@ -46,23 +50,8 @@ const leadListSelect = {
 
 type LeadListRow = Prisma.LeadGetPayload<{ select: typeof leadListSelect }>;
 
-function serializeLead(lead: {
-  id: string;
-  company: string;
-  niche: string | null;
-  contact: string | null;
-  phone: string | null;
-  priority: string | null;
-  followUpDate: Date | null;
-  followUpTime: Date | null;
-  stage: { name: string };
-  assignee: { name: string };
-  source: { name: string } | null;
-  createdAt: Date;
-  stageChangedAt: Date | null;
-  _count: { activities: number };
-  activities: { outcome: string; notes: string | null }[];
-}) {
+function serializeLead(lead: LeadListRow) {
+  const display = resolveDisplayFollowUp(lead);
   return {
     id: lead.id,
     company: lead.company,
@@ -70,8 +59,8 @@ function serializeLead(lead: {
     contact: lead.contact ?? "",
     phone: lead.phone ?? "",
     priority: lead.priority,
-    followUpDate: lead.followUpDate?.toISOString() ?? null,
-    followUpTime: lead.followUpTime?.toISOString() ?? null,
+    followUpDate: display.date,
+    followUpTime: display.time,
     stage: lead.stage.name,
     assigneeName: lead.assignee.name,
     source: lead.source?.name ?? "",
@@ -101,12 +90,29 @@ export async function GET(request: Request) {
   const dateRange = text(searchParams.get("dateRange"));
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+  const dayEnd = new Date(today.getTime() + 24 * 60 * 60 * 1000);
+  const weekEnd = new Date(today.getTime() + 8 * 24 * 60 * 60 * 1000);
   const dateFilter = dateRange === "Overdue"
-    ? { followUpDate: { lt: today } }
+    ? {
+      OR: [
+        { followUpDate: { lt: today } },
+        { proposalFollowUpDate: { lt: today } },
+      ],
+    }
     : dateRange === "Today"
-      ? { followUpDate: { gte: today, lt: new Date(today.getTime() + 24 * 60 * 60 * 1000) } }
+      ? {
+        OR: [
+          { followUpDate: { gte: today, lt: dayEnd } },
+          { proposalFollowUpDate: { gte: today, lt: dayEnd } },
+        ],
+      }
       : dateRange === "Next 7 days"
-        ? { followUpDate: { gte: today, lt: new Date(today.getTime() + 8 * 24 * 60 * 60 * 1000) } }
+        ? {
+          OR: [
+            { followUpDate: { gte: today, lt: weekEnd } },
+            { proposalFollowUpDate: { gte: today, lt: weekEnd } },
+          ],
+        }
         : {};
   const stageFilter = stage
     ? { name: stage }
@@ -116,7 +122,12 @@ export async function GET(request: Request) {
   const where = {
     ...leadAccessWhere(profile),
     ...(followUpsOnly
-      ? { followUpDate: { not: null } }
+      ? {
+        OR: [
+          { followUpDate: { not: null } },
+          { proposalFollowUpDate: { not: null } },
+        ],
+      }
       : {}),
     ...(stageFilter ? { stage: stageFilter } : {}),
     ...(assignee ? { assignee: { name: assignee } } : {}),

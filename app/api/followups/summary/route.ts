@@ -1,17 +1,20 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { leadAccessWhere, requireProfile } from "@/lib/api-auth";
+import { resolveDisplayFollowUp } from "@/lib/lead-ui";
 import { Prisma } from "../../../../generated/prisma/client";
 
 const CLOSED_STAGE_NAMES = ["Closed Won", "Closed Lost", "Dead Lead"];
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-function dateKey(date: Date) {
-  return date.toISOString().slice(0, 10);
+function dateKey(date: Date | string) {
+  return (date instanceof Date ? date : new Date(date)).toISOString().slice(0, 10);
 }
 
-function timeMinutes(time: Date | null) {
-  return time ? time.getUTCHours() * 60 + time.getUTCMinutes() : null;
+function timeMinutes(time: Date | string | null) {
+  if (!time) return null;
+  const value = time instanceof Date ? time : new Date(time);
+  return Number.isNaN(value.getTime()) ? null : value.getUTCHours() * 60 + value.getUTCMinutes();
 }
 
 function userWallClock(request: Request, now: Date) {
@@ -23,6 +26,10 @@ function userWallClock(request: Request, now: Date) {
 const followUpSelect = {
   followUpDate: true,
   followUpTime: true,
+  followUpUpdatedAt: true,
+  proposalFollowUpDate: true,
+  proposalFollowUpTime: true,
+  proposalFollowUpUpdatedAt: true,
 } satisfies Prisma.LeadSelect;
 
 export async function GET(request: Request) {
@@ -34,11 +41,15 @@ export async function GET(request: Request) {
   const todayKey = dateKey(wallClock);
   const horizonKey = dateKey(new Date(wallClock.getTime() + 7 * DAY_MS));
   const nowMinutes = timeMinutes(wallClock);
+  const horizonDate = new Date(new Date(todayKey).getTime() + 9 * DAY_MS);
 
   const leads = await prisma.lead.findMany({
     where: {
       ...leadAccessWhere(profile),
-      followUpDate: { not: null, lte: new Date(new Date(todayKey).getTime() + 9 * DAY_MS) },
+      OR: [
+        { followUpDate: { not: null, lte: horizonDate } },
+        { proposalFollowUpDate: { not: null, lte: horizonDate } },
+      ],
       stage: { name: { notIn: CLOSED_STAGE_NAMES } },
     },
     select: followUpSelect,
@@ -48,11 +59,13 @@ export async function GET(request: Request) {
   let missed = 0;
   let upcoming = 0;
   for (const lead of leads) {
-    const key = dateKey(lead.followUpDate as Date);
+    const display = resolveDisplayFollowUp(lead);
+    if (!display.date) continue;
+    const key = dateKey(display.date);
     if (key < todayKey) {
       missed++;
     } else if (key === todayKey) {
-      const minutes = timeMinutes(lead.followUpTime);
+      const minutes = timeMinutes(display.time);
       if (minutes !== null && minutes < (nowMinutes as number)) missed++;
       else today++;
     } else if (key <= horizonKey) {

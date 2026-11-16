@@ -122,6 +122,7 @@ const OUTCOME_LABEL: Record<string, string> = {
   no_answer: "No Answer",
   callback_requested: "Callback Requested",
   proposal_discussed: "Proposal Discussed",
+  proposal_sent: "Proposal Sent",
   meeting_set: "Meeting Set",
   closed_lost: "Closed Lost",
 };

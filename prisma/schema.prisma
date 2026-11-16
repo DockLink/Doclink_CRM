@@ -111,20 +111,24 @@ model Lead {
   niche            String?
   contact          String?
   phone            String?
-  followUpDate     DateTime? @map("follow_up_date") @db.Date
-  followUpTime     DateTime? @map("follow_up_time") @db.Time
-  sourceId         String?   @map("source_id") @db.Uuid
-  priority         Priority?
-  stageId          String    @map("stage_id") @db.Uuid
-  assigneeId       String    @map("assignee_id") @db.Uuid
-  proposalSent     Boolean   @default(false) @map("proposal_sent")
-  proposalSentDate DateTime? @map("proposal_sent_date")
-  lostReason       String?   @map("lost_reason") // required in app logic when stage = Closed Lost (FR per Section 5)
-  notes            String?
-  stageChangedAt   DateTime? @map("stage_changed_at")
-  lastActivityAt   DateTime? @map("last_activity_at")
-  createdAt        DateTime  @default(now()) @map("created_at")
-  createdBy        String?   @map("created_by") @db.Uuid
+  followUpDate               DateTime? @map("follow_up_date") @db.Date
+  followUpTime               DateTime? @map("follow_up_time") @db.Time
+  followUpUpdatedAt          DateTime? @map("follow_up_updated_at")
+  proposalFollowUpDate       DateTime? @map("proposal_follow_up_date") @db.Date
+  proposalFollowUpTime       DateTime? @map("proposal_follow_up_time") @db.Time
+  proposalFollowUpUpdatedAt  DateTime? @map("proposal_follow_up_updated_at")
+  sourceId                   String?   @map("source_id") @db.Uuid
+  priority                   Priority?
+  stageId                    String    @map("stage_id") @db.Uuid
+  assigneeId                 String    @map("assignee_id") @db.Uuid
+  proposalSent               Boolean   @default(false) @map("proposal_sent")
+  proposalSentDate           DateTime? @map("proposal_sent_date")
+  lostReason                 String?   @map("lost_reason") // required in app logic when stage = Closed Lost (FR per Section 5)
+  notes                      String?
+  stageChangedAt             DateTime? @map("stage_changed_at")
+  lastActivityAt             DateTime? @map("last_activity_at")
+  createdAt                  DateTime  @default(now()) @map("created_at")
+  createdBy                  String?   @map("created_by") @db.Uuid
 
   stage             PipelineStage          @relation(fields: [stageId], references: [id])
   assignee          User                   @relation("AssignedLeads", fields: [assigneeId], references: [id])

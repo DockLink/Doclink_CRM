@@ -37,38 +37,6 @@ type PendingLost = {
 
 const PRIORITY_COLOR = { hot: "#EF4444", warm: "#F59E0B", cold: "#3B82F6" };
 
-// ─── Initial lead data (includes stage field for lifted state) ─────────────────
-
-const INITIAL_LEADS: Lead[] = [
-  // New Lead
-  { id: "nl1", stage: "New Lead", company: "Vertex Systems", niche: "SaaS", contact: "Angela Park", phone: "+1 555 201 4432", priority: "warm", followUp: { date: "Thu 15 Sep", urgency: "upcoming" }, calls: 0, assigneeInitials: "JC", assigneeColor: "#2FBEB3", neverContacted: true },
-  { id: "nl2", stage: "New Lead", company: "Luminary Co.", niche: "Fintech", contact: "Ben Howell", phone: "+1 555 887 3310", priority: "cold", followUp: { date: "Fri 16 Sep", urgency: "upcoming" }, calls: 0, assigneeInitials: "MR", assigneeColor: "#F59E0B", neverContacted: true },
-  // No Answer
-  { id: "na1", stage: "No Answer", company: "Crestline Labs", niche: "Pharma", contact: "Priya Singh", phone: "+1 555 443 0091", priority: "hot", followUp: { date: "Today 14:00", urgency: "today" }, calls: 2, assigneeInitials: "AS", assigneeColor: "#6366F1" },
-  { id: "na2", stage: "No Answer", company: "Orion Partners", niche: "Logistics", contact: "Julia Chen", phone: "+1 555 662 7712", priority: "warm", followUp: { date: "Yesterday 09:00", urgency: "overdue" }, calls: 1, assigneeInitials: "DK", assigneeColor: "#F97316" },
-  // Try Again
-  { id: "ta1", stage: "Try Again", company: "Atlas Holdings", niche: "Real Estate", contact: "Carlos Ruiz", phone: "+1 555 771 5543", priority: "warm", followUp: { date: "Today 11:30", urgency: "today" }, calls: 3, assigneeInitials: "NW", assigneeColor: "#16A34A" },
-  // Conversation
-  { id: "cv1", stage: "Conversation", company: "Meridian Corp", niche: "Enterprise SaaS", contact: "Sarah Blake", phone: "+1 555 340 9921", priority: "hot", followUp: { date: "Today 15:30", urgency: "today" }, calls: 5, assigneeInitials: "JC", assigneeColor: "#2FBEB3" },
-  { id: "cv2", stage: "Conversation", company: "Pinnacle Health", niche: "Healthcare", contact: "Diane Yuen", phone: "+1 555 219 6644", priority: "warm", followUp: { date: "Yesterday 16:00", urgency: "overdue" }, calls: 3, assigneeInitials: "AS", assigneeColor: "#6366F1" },
-  { id: "cv3", stage: "Conversation", company: "Solaris Group", niche: "Clean Energy", contact: "Emma Novak", phone: "+1 555 508 1177", priority: "hot", followUp: { date: "Thu 15 Sep", urgency: "upcoming" }, calls: 4, assigneeInitials: "MR", assigneeColor: "#F59E0B" },
-  { id: "cv4", stage: "Conversation", company: "Redwood Capital", niche: "Investment", contact: "Marcus Webb", phone: "+1 555 430 8823", priority: "cold", followUp: { date: "Mon 18 Sep", urgency: "upcoming" }, calls: 2, assigneeInitials: "NW", assigneeColor: "#16A34A" },
-  // Proposal Sent
-  { id: "ps1", stage: "Proposal Sent", company: "Nexus Digital", niche: "Agency", contact: "Tom Brennan", phone: "+1 555 774 3300", priority: "hot", followUp: { date: "Yesterday 11:00", urgency: "overdue" }, calls: 6, assigneeInitials: "JC", assigneeColor: "#2FBEB3" },
-  { id: "ps2", stage: "Proposal Sent", company: "Vanguard Tech", niche: "Deep Tech", contact: "Raj Patel", phone: "+1 555 991 2254", priority: "warm", followUp: { date: "Today 10:30", urgency: "today" }, calls: 4, assigneeInitials: "DK", assigneeColor: "#F97316" },
-  // Meeting Booked
-  { id: "mb1", stage: "Meeting Booked", company: "Summit Partners", niche: "Consulting", contact: "Keiko Tanaka", phone: "+1 555 663 4410", priority: "warm", followUp: { date: "Fri 16 Sep", urgency: "upcoming" }, calls: 5, assigneeInitials: "AS", assigneeColor: "#6366F1" },
-  // Estimate Sent
-  { id: "es1", stage: "Estimate Sent", company: "Ironbridge Group", niche: "Infrastructure", contact: "Paul Denton", phone: "+1 555 382 9901", priority: "hot", followUp: { date: "Today 16:00", urgency: "today" }, calls: 7, assigneeInitials: "JC", assigneeColor: "#2FBEB3" },
-  { id: "es2", stage: "Estimate Sent", company: "Clearpath Media", niche: "Marketing", contact: "Sofia Reyes", phone: "+1 555 114 5530", priority: "warm", followUp: { date: "Wed 20 Sep", urgency: "upcoming" }, calls: 5, assigneeInitials: "NW", assigneeColor: "#16A34A" },
-  // Closed Won
-  { id: "cw1", stage: "Closed Won", company: "Apex Industries", niche: "Manufacturing", contact: "Derek Owens", phone: "+1 555 124 8870", priority: "warm", followUp: { date: "Mon 18 Sep", urgency: "upcoming" }, calls: 8, assigneeInitials: "NW", assigneeColor: "#16A34A" },
-  // Closed Lost
-  { id: "cl1", stage: "Closed Lost", company: "Crestview Corp", niche: "Retail", contact: "Liam O'Brien", phone: "+1 555 335 7720", priority: "cold", followUp: { date: "—", urgency: "none" }, calls: 3, assigneeInitials: "MR", assigneeColor: "#F59E0B" },
-  // Dead Lead
-  { id: "dl1", stage: "Dead Lead", company: "Ironclad Media", niche: "Media", contact: "Claire Fox", phone: "+1 555 990 1143", priority: "cold", followUp: { date: "—", urgency: "none" }, calls: 1, assigneeInitials: "DK", assigneeColor: "#F97316" },
-];
-
 // ─── Icons ────────────────────────────────────────────────────────────────────
 
 function PriorityDot({ priority }: { priority: "hot" | "warm" | "cold" }) {
