@@ -160,6 +160,7 @@ export async function PATCH(
     phone?: string;
     source?: string;
     assigneeName?: string;
+    priority?: "hot" | "warm" | "cold";
     proposalSent?: boolean;
     notes?: string | null;
     customFields?: Array<{ id?: string; value?: string | boolean }>;
@@ -179,6 +180,7 @@ export async function PATCH(
     phone?: string | null;
     sourceId?: string | null;
     assigneeId?: string;
+    priority?: "hot" | "warm" | "cold";
     proposalSent?: boolean;
     proposalSentDate?: Date | null;
     notes?: string | null;
@@ -203,6 +205,12 @@ export async function PATCH(
     const assignee = await prisma.user.findFirst({ where: { name: text(body.assigneeName), isActive: true } });
     if (!assignee) return NextResponse.json({ error: "Selected assignee was not found" }, { status: 400 });
     data.assigneeId = assignee.id;
+  }
+  if (body.priority !== undefined) {
+    if (!["hot", "warm", "cold"].includes(body.priority)) {
+      return NextResponse.json({ error: "Priority must be hot, warm, or cold" }, { status: 400 });
+    }
+    data.priority = body.priority;
   }
   if (typeof body.proposalSent === "boolean") {
     data.proposalSent = body.proposalSent;

@@ -39,14 +39,6 @@ interface AssignableUser {
   color: string;
 }
 
-// ─── Seed data ────────────────────────────────────────────────────────────────
-
-const NICHES = [
-  "Enterprise SaaS", "Healthcare", "Agency", "Deep Tech", "Infrastructure",
-  "Fintech", "Clean Energy", "Consulting", "Real Estate", "Investment",
-  "Logistics", "Retail", "Marketing", "Pharma",
-];
-
 const SOURCES = ["Referral", "Website", "Cold Call", "LinkedIn", "Trade Show", "Email Campaign", "Partner", "Event"];
 
 const PRIORITY_COLOR: Record<Exclude<Priority, null>, string> = {
@@ -232,11 +224,25 @@ function SelectInput({
 // Niche select with "+ Add new" option
 function NicheSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const [open, setOpen] = useState(false);
-  const [niches, setNiches] = useState(NICHES);
+  const [niches, setNiches] = useState<string[]>([]);
   const [newNiche, setNewNiche] = useState("");
   const [addingNew, setAddingNew] = useState(false);
   const [focused, setFocused] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const loadNiches = async () => {
+      try {
+        const response = await fetch("/api/leads?meta=1");
+        const result = await response.json() as { niches?: string[] };
+        if (!response.ok) return;
+        setNiches(result.niches ?? []);
+      } catch {
+        setNiches([]);
+      }
+    };
+    void loadNiches();
+  }, []);
 
   useEffect(() => {
     if (!open) return;

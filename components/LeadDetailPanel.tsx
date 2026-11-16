@@ -429,6 +429,8 @@ function DetailsTab({
   const latestNotes = useRef(notes);
   const [showLogModal, setShowLogModal] = useState(false);
   const [customFieldError, setCustomFieldError] = useState("");
+  const [priorityError, setPriorityError] = useState("");
+  const [prioritySaving, setPrioritySaving] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const setCustomFieldValue = (fieldId: string, value: string | boolean) => {
@@ -488,6 +490,22 @@ function DetailsTab({
     } catch (err) {
       onLeadChange((prev) => ({ ...prev, ...previous }));
       setCustomFieldError(err instanceof Error ? err.message : "Unable to save follow-up.");
+    }
+  };
+
+  const savePriority = async (priority: Priority) => {
+    if (priority === lead.priority || prioritySaving) return;
+    const previous = lead.priority;
+    setPriorityError("");
+    setPrioritySaving(true);
+    onLeadChange((prev) => ({ ...prev, priority }));
+    try {
+      await patchLead(lead.id, { priority });
+    } catch (err) {
+      onLeadChange((prev) => ({ ...prev, priority: previous }));
+      setPriorityError(err instanceof Error ? err.message : "Unable to save priority.");
+    } finally {
+      setPrioritySaving(false);
     }
   };
 
@@ -668,7 +686,9 @@ function DetailsTab({
                   return (
                     <button
                       key={p}
-                      onClick={() => onLeadChange({ ...lead, priority: p })}
+                      type="button"
+                      onClick={() => void savePriority(p)}
+                      disabled={prioritySaving}
                       className="flex-1 flex items-center justify-center gap-1.5 font-semibold"
                       style={{
                         height: 36,
@@ -685,6 +705,7 @@ function DetailsTab({
                   );
                 })}
               </div>
+              {priorityError && <p role="alert" style={{ marginTop: 6, fontSize: 12, color: "#DC2626" }}>{priorityError}</p>}
             </div>
 
             {/* Mark as Dead Lead */}

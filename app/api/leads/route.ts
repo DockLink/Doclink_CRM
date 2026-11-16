@@ -77,6 +77,18 @@ export async function GET(request: Request) {
   if (!profile) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const searchParams = new URL(request.url).searchParams;
+  if (searchParams.get("meta") === "1") {
+    const nicheRows = await prisma.lead.findMany({
+      where: { niche: { not: null }, ...leadAccessWhere(profile) },
+      distinct: ["niche"],
+      select: { niche: true },
+    });
+    const niches = nicheRows
+      .map((row) => row.niche?.trim() ?? "")
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+    return NextResponse.json({ niches });
+  }
   const query = text(searchParams.get("q"));
   const followUpsOnly = searchParams.get("followups") === "1";
   const page = Math.max(1, Number(searchParams.get("page") ?? "1") || 1);
