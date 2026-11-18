@@ -40,6 +40,17 @@ export function requireRole(profile: { role: string }, role: "superadmin" | "adm
   return profile.role === role ? null : NextResponse.json({ error: "Forbidden" }, { status: 403 });
 }
 
+/** Invoice module is Super Admin only. */
+export function canAccessInvoices(profile: { role: string; canAccessInvoices?: boolean }) {
+  return profile.role === "superadmin";
+}
+
+export function requireInvoiceAccess(profile: { role: string; canAccessInvoices?: boolean }) {
+  return canAccessInvoices(profile)
+    ? null
+    : NextResponse.json({ error: "Forbidden" }, { status: 403 });
+}
+
 export function leadAccessWhere(profile: { id: string; role: string }) {
   // Both authenticated CRM roles have company-wide read access. Mutation
   // endpoints still enforce their separate superadmin-only authorization rules.

@@ -32,10 +32,28 @@ async function getSuperadmin() {
   return profile?.role === "superadmin" ? profile : null;
 }
 
-function serializeUser(user: { id: string; name: string; email: string; role: "superadmin" | "admin"; isActive: boolean; createdAt: Date }) {
+function serializeUser(user: {
+  id: string;
+  name: string;
+  email: string;
+  role: "superadmin" | "admin";
+  isActive: boolean;
+  canAccessInvoices: boolean;
+  createdAt: Date;
+}) {
   const initials = user.name.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase();
   const color = USER_COLORS[user.name.length % USER_COLORS.length];
-  return { id: user.id, name: user.name, email: user.email, role: user.role, status: user.isActive ? "active" : "inactive", initials, color, createdAt: user.createdAt.toISOString() };
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    status: user.isActive ? "active" : "inactive",
+    canAccessInvoices: user.role === "superadmin" || user.canAccessInvoices,
+    initials,
+    color,
+    createdAt: user.createdAt.toISOString(),
+  };
 }
 
 export async function GET() {
@@ -101,13 +119,27 @@ export async function PATCH(request: Request) {
   const profile = await getSuperadmin();
   if (!profile) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  const body = await request.json() as { id?: string; name?: string; email?: string; role?: "admin" | "superadmin"; password?: string; isActive?: boolean };
+  const body = await request.json() as {
+    id?: string;
+    name?: string;
+    email?: string;
+    role?: "admin" | "superadmin";
+    password?: string;
+    isActive?: boolean;
+    canAccessInvoices?: boolean;
+  };
   if (!body.id) return NextResponse.json({ error: "User id is required" }, { status: 400 });
 
   const target = await prisma.user.findUnique({ where: { id: body.id } });
   if (!target) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
-  const data: { name?: string; email?: string; role?: "admin" | "superadmin"; isActive?: boolean } = {};
+  const data: {
+    name?: string;
+    email?: string;
+    role?: "admin" | "superadmin";
+    isActive?: boolean;
+    canAccessInvoices?: boolean;
+  } = {};
 
   if (body.name !== undefined) {
     const name = body.name.trim();
@@ -138,6 +170,12 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: "Cannot deactivate a superadmin" }, { status: 400 });
     }
     data.isActive = body.isActive;
+  }
+
+  if (body.canAccessInvoices !== undefined) {
+    // Superadmins always have access; only persist the grant for admins.
+    const nextRole = data.role ?? target.role;
+    data.canAccessInvoices = nextRole === "superadmin" ? false : Boolean(body.canAccessInvoices);
   }
 
   const password = body.password;

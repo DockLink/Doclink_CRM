@@ -178,6 +178,7 @@ interface User {
   email: string;
   role: "superadmin" | "admin";
   status: "active" | "inactive";
+  canAccessInvoices: boolean;
   initials: string;
   color: string;
 }
@@ -273,7 +274,15 @@ function AddUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
   );
 }
 
-async function patchUser(body: { id: string; name?: string; email?: string; role?: UserRole; password?: string; isActive?: boolean }) {
+async function patchUser(body: {
+  id: string;
+  name?: string;
+  email?: string;
+  role?: UserRole;
+  password?: string;
+  isActive?: boolean;
+  canAccessInvoices?: boolean;
+}) {
   try {
     const response = await fetch("/api/users", {
       method: "PATCH",
@@ -439,6 +448,17 @@ function UsersFrame() {
     replaceUser(result.user);
   };
 
+  const toggleInvoicesAccess = async (user: User) => {
+    if (user.role === "superadmin") return;
+    setActionError("");
+    const result = await patchUser({ id: user.id, canAccessInvoices: !user.canAccessInvoices });
+    if (result.error || !result.user) {
+      setActionError(result.error ?? "Unable to update invoices access.");
+      return;
+    }
+    replaceUser(result.user);
+  };
+
   const deleteUser = async (user: User) => {
     if (!window.confirm(`Permanently delete ${user.name}? This cannot be undone.`)) return;
     setActionError("");
@@ -464,14 +484,14 @@ function UsersFrame() {
           <thead>
             <tr style={{ background: "#F9FAFB", borderBottom: "1px solid #E3E7EF" }}>
               {["User", "Email", "Role", "Status", "Actions"].map((h, i) => (
-                <th key={h} className={i === 4 ? "text-right" : "text-left"} style={{ padding: "10px 16px", fontSize: 11, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.06em" }}>{h}</th>
+                <th key={h} className={i === 5 ? "text-right" : "text-left"} style={{ padding: "10px 16px", fontSize: 11, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.06em" }}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan={5} style={{ padding: 24, textAlign: "center", color: "#6B7280", fontSize: 13 }}>Loading users...</td></tr>}
-            {!loading && error && <tr><td colSpan={5} style={{ padding: 24, textAlign: "center", color: "#DC2626", fontSize: 13 }}>{error}</td></tr>}
-            {!loading && !error && users.length === 0 && <tr><td colSpan={5} style={{ padding: 24, textAlign: "center", color: "#6B7280", fontSize: 13 }}>No users found.</td></tr>}
+            {loading && <tr><td colSpan={6} style={{ padding: 24, textAlign: "center", color: "#6B7280", fontSize: 13 }}>Loading users...</td></tr>}
+            {!loading && error && <tr><td colSpan={6} style={{ padding: 24, textAlign: "center", color: "#DC2626", fontSize: 13 }}>{error}</td></tr>}
+            {!loading && !error && users.length === 0 && <tr><td colSpan={6} style={{ padding: 24, textAlign: "center", color: "#6B7280", fontSize: 13 }}>No users found.</td></tr>}
             {!loading && !error && users.map((u, i) => {
               const inactive = u.status === "inactive";
               return (

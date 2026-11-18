@@ -5,10 +5,17 @@ import { setDraftOwner } from "@/lib/use-form-draft";
 import type { UserRole } from "./types";
 
 const RoleContext = createContext<UserRole>("admin");
-const NameContext = createContext<{ name: string; setName: (name: string) => void; setRole: (role: UserRole) => void }>({
+const InvoiceAccessContext = createContext(false);
+const NameContext = createContext<{
+  name: string;
+  setName: (name: string) => void;
+  setRole: (role: UserRole) => void;
+  setCanAccessInvoices: (value: boolean) => void;
+}>({
   name: "",
   setName: () => {},
   setRole: () => {},
+  setCanAccessInvoices: () => {},
 });
 
 export function RoleProvider({
@@ -19,6 +26,7 @@ export function RoleProvider({
   children: ReactNode;
 }) {
   const [role, setRole] = useState<UserRole | null>(null);
+  const [canAccessInvoices, setCanAccessInvoices] = useState(false);
   const [name, setName] = useState("");
 
   useEffect(() => {
@@ -27,7 +35,7 @@ export function RoleProvider({
       .then(async (response) => {
         if (!response.ok) return null;
         const result = (await response.json()) as {
-          session?: { id: string; name: string; role: UserRole };
+          session?: { id: string; name: string; role: UserRole; canAccessInvoices?: boolean };
         };
         return result.session ?? null;
       })
@@ -36,6 +44,7 @@ export function RoleProvider({
         setDraftOwner(session.id);
         setRole(session.role);
         setName(session.name.trim());
+        setCanAccessInvoices(session.role === "superadmin");
       })
       .catch((error: unknown) => {
         console.error("Unable to load the authenticated CRM session.", error);
@@ -50,13 +59,21 @@ export function RoleProvider({
 
   return (
     <RoleContext.Provider value={role}>
-      <NameContext.Provider value={{ name, setName, setRole }}>{children}</NameContext.Provider>
+      <InvoiceAccessContext.Provider value={canAccessInvoices}>
+        <NameContext.Provider value={{ name, setName, setRole, setCanAccessInvoices }}>
+          {children}
+        </NameContext.Provider>
+      </InvoiceAccessContext.Provider>
     </RoleContext.Provider>
   );
 }
 
 export function useRole(): UserRole {
   return useContext(RoleContext);
+}
+
+export function useCanAccessInvoices(): boolean {
+  return useContext(InvoiceAccessContext);
 }
 
 export function useDisplayName() {

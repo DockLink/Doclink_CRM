@@ -36,22 +36,61 @@ enum CustomFieldType {
   URL
 }
 
+enum ClientType {
+  new
+  existing
+}
+
+enum BillingType {
+  one_time_development
+  monthly_retainer
+  both
+}
+
+enum InvoiceStatus {
+  draft
+  sent
+  part_paid
+  paid
+  void
+}
+
+enum InvoiceAccountType {
+  savings
+  current
+}
+
+enum RecurringInvoiceStatus {
+  active
+  paused
+}
+
+enum InvoiceNotificationType {
+  recurring_draft_created
+  recurring_draft_failed
+}
+
 // ─────────────────────────────────────────────
 // Users  (SRS Section 4, 14)
 // ─────────────────────────────────────────────
 
 model User {
-  id           String   @id @default(uuid()) @db.Uuid
-  name         String
-  email        String   @unique
-  passwordHash String   @map("password_hash")
-  role         Role     @default(admin)
-  isActive     Boolean  @default(true) @map("is_active")
-  createdAt    DateTime @default(now()) @map("created_at")
+  id                String   @id @default(uuid()) @db.Uuid
+  name              String
+  email             String   @unique
+  passwordHash      String   @map("password_hash")
+  role              Role     @default(admin)
+  isActive          Boolean  @default(true) @map("is_active")
+  canAccessInvoices Boolean  @default(false) @map("can_access_invoices")
+  createdAt         DateTime @default(now()) @map("created_at")
 
-  assignedLeads Lead[]     @relation("AssignedLeads")
-  createdLeads  Lead[]     @relation("CreatedLeads")
-  loggedCalls   Activity[]
+  assignedLeads         Lead[]                   @relation("AssignedLeads")
+  createdLeads          Lead[]                   @relation("CreatedLeads")
+  loggedCalls           Activity[]
+  createdInvoiceClients InvoiceClient[]          @relation("CreatedInvoiceClients")
+  createdInvoices       Invoice[]                @relation("CreatedInvoices")
+  invoicePayments       InvoicePayment[]
+  invoiceNotifications  InvoiceNotification[]    @relation("InvoiceNotificationActor")
 
   @@map("users")
 }
@@ -196,4 +235,199 @@ model LeadCustomFieldValue {
 
   @@unique([leadId, customFieldId])
   @@map("lead_custom_field_values")
+}
+
+// ─────────────────────────────────────────────
+// Invoicing (independent of CRM Leads)
+// ─────────────────────────────────────────────
+
+model CompanyInvoiceSettings {
+  id                   String   @id @default(uuid()) @db.Uuid
+  companyName          String   @default("DocLink") @map("company_name")
+  companyPhone         String   @default("+94 76 567 2814") @map("company_phone")
+  companyEmail         String   @default("info@doclinkcare.com") @map("company_email")
+  companyWebsite       String   @default("doclinkcare.com") @map("company_website")
+  defaultBankName      String   @default("HNB") @map("default_bank_name")
+  defaultAccountName   String   @default("DocLink") @map("default_account_name")
+  defaultAccountNumber String   @default("188020074949") @map("default_account_number")
+  termsAndConditions   String   @default("Payment — Payable by bank transfer before the billing month begins. Please use the invoice number as the payment reference.\nLate Payment — If payment is not received by the due date, work is paused until it is received.\nTaxes & Charges — No tax is applied to this invoice. Any bank transfer charges are to be covered by the payer.\nRefunds — Payments are non-refundable as the service is ongoing and work begins on the start date, as set out in the Marketing Service Agreement.") @map("terms_and_conditions") @db.Text
+  nextInvoiceSequence  Int      @default(1) @map("next_invoice_sequence")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  paymentAccounts InvoicePaymentAccount[]
+
+  @@map("company_invoice_settings")
+}
+
+model InvoicePaymentAccount {
+  id            String             @id @default(uuid()) @db.Uuid
+  settingsId    String             @map("settings_id") @db.Uuid
+  accountType   InvoiceAccountType @map("account_type")
+  bankName      String             @map("bank_name")
+  branch        String?            @map("branch")
+  accountName   String             @map("account_name")
+  accountNumber String             @map("account_number")
+  isActive      Boolean            @default(true) @map("is_active")
+  createdAt     DateTime           @default(now()) @map("created_at")
+  updatedAt     DateTime           @updatedAt @map("updated_at")
+
+  settings CompanyInvoiceSettings @relation(fields: [settingsId], references: [id], onDelete: Cascade)
+
+  @@unique([settingsId, accountType])
+  @@map("invoice_payment_accounts")
+}
+
+model InvoiceClient {
+  id            String      @id @default(uuid()) @db.Uuid
+  clientName    String      @map("client_name")
+  companyName   String      @map("company_name")
+  contactPerson String?     @map("contact_person")
+  email         String?
+  phone         String?
+  billingAddress String?    @map("billing_address")
+  city          String?
+  country       String?
+  postalCode    String?     @map("postal_code")
+  clientType    ClientType  @default(new) @map("client_type")
+  billingType   BillingType @default(one_time_development) @map("billing_type")
+  notes         String?     @db.Text
+  createdById   String?     @map("created_by_id") @db.Uuid
+  createdAt     DateTime    @default(now()) @map("created_at")
+  updatedAt     DateTime    @updatedAt @map("updated_at")
+
+  createdBy       User?                   @relation("CreatedInvoiceClients", fields: [createdById], references: [id])
+  invoices        Invoice[]
+  recurringConfig RecurringInvoiceConfig?
+  notifications   InvoiceNotification[]
+
+  @@index([companyName])
+  @@index([clientType])
+  @@map("invoice_clients")
+}
+
+model RecurringInvoiceConfig {
+  id                String                 @id @default(uuid()) @db.Uuid
+  invoiceClientId   String                 @unique @map("invoice_client_id") @db.Uuid
+  billingFrequency  String                 @default("monthly") @map("billing_frequency")
+  billingDay        Int                    @default(1) @map("billing_day")
+  monthlyItems      Json                   @default("[]") @map("monthly_items")
+  monthlyAmount     Decimal                @default(0) @map("monthly_amount") @db.Decimal(14, 2)
+  discountPercent   Decimal                @default(0) @map("discount_percent") @db.Decimal(5, 2)
+  dueDateRule       String                 @default("same_as_billing_day") @map("due_date_rule")
+  paymentDetails    String?                @map("payment_details") @db.Text
+  status            RecurringInvoiceStatus @default(active)
+  lastGeneratedMonth DateTime?             @map("last_generated_month") @db.Date
+  createdAt         DateTime               @default(now()) @map("created_at")
+  updatedAt         DateTime               @updatedAt @map("updated_at")
+
+  invoiceClient InvoiceClient @relation(fields: [invoiceClientId], references: [id], onDelete: Cascade)
+
+  @@map("recurring_invoice_configs")
+}
+
+model Invoice {
+  id                  String              @id @default(uuid()) @db.Uuid
+  invoiceNumber       String?             @unique @map("invoice_number")
+  status              InvoiceStatus       @default(draft)
+  clientType          ClientType          @map("client_type")
+  invoiceType         BillingType         @default(one_time_development) @map("invoice_type")
+  invoiceDate         DateTime            @map("invoice_date") @db.Date
+  dueDate             DateTime            @map("due_date") @db.Date
+  billingMonth        DateTime            @map("billing_month") @db.Date
+  currency            String              @default("LKR")
+  subtotal            Decimal             @default(0) @db.Decimal(14, 2)
+  discountPercent     Decimal             @default(0) @map("discount_percent") @db.Decimal(5, 2)
+  discountAmount      Decimal             @default(0) @map("discount_amount") @db.Decimal(14, 2)
+  total               Decimal             @default(0) @db.Decimal(14, 2)
+  amountPaid          Decimal             @default(0) @map("amount_paid") @db.Decimal(14, 2)
+  daysLate            Int                 @default(0) @map("days_late")
+  // Snapshots frozen at send time (also used while drafting)
+  billToName          String?             @map("bill_to_name")
+  billToCompany       String?             @map("bill_to_company")
+  billToLine1         String?             @map("bill_to_line1")
+  billToLine2         String?             @map("bill_to_line2")
+  billToCity          String?             @map("bill_to_city")
+  billToCountry       String?             @map("bill_to_country")
+  billToPostal        String?             @map("bill_to_postal")
+  bankName            String?             @map("bank_name")
+  accountName         String?             @map("account_name")
+  accountNumber       String?             @map("account_number")
+  paymentAccountType  InvoiceAccountType? @map("payment_account_type")
+  showSavingsAccount  Boolean             @default(true) @map("show_savings_account")
+  showCurrentAccount  Boolean             @default(true) @map("show_current_account")
+  paymentDetails      String?             @map("payment_details") @db.Text
+  termsAndConditions  String?             @map("terms_and_conditions") @db.Text
+  reminderDismissedAt DateTime?           @map("reminder_dismissed_at")
+  sentAt              DateTime?           @map("sent_at")
+  paidAt              DateTime?           @map("paid_at")
+  createdAt           DateTime            @default(now()) @map("created_at")
+  updatedAt           DateTime            @updatedAt @map("updated_at")
+  invoiceClientId     String              @map("invoice_client_id") @db.Uuid
+  createdById         String              @map("created_by_id") @db.Uuid
+
+  invoiceClient InvoiceClient          @relation(fields: [invoiceClientId], references: [id], onDelete: Restrict)
+  createdBy     User                   @relation("CreatedInvoices", fields: [createdById], references: [id])
+  lineItems     InvoiceLineItem[]
+  payments      InvoicePayment[]
+  notifications InvoiceNotification[]
+
+  @@index([status, dueDate])
+  @@index([invoiceClientId])
+  @@index([dueDate])
+  @@index([billingMonth])
+  @@map("invoices")
+}
+
+model InvoicePayment {
+  id              String   @id @default(uuid()) @db.Uuid
+  invoiceId       String   @map("invoice_id") @db.Uuid
+  amount          Decimal  @db.Decimal(14, 2)
+  paymentDate     DateTime @map("payment_date") @db.Date
+  paymentMethod   String?  @map("payment_method")
+  referenceNumber String?  @map("reference_number")
+  daysLate        Int      @default(0) @map("days_late")
+  notes           String?
+  createdById     String   @map("created_by_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  createdBy User    @relation(fields: [createdById], references: [id])
+
+  @@index([invoiceId, paymentDate])
+  @@map("invoice_payments")
+}
+
+model InvoiceLineItem {
+  id          String  @id @default(uuid()) @db.Uuid
+  invoiceId   String  @map("invoice_id") @db.Uuid
+  description String
+  qty         Int     @default(1)
+  unitPrice   Decimal @map("unit_price") @db.Decimal(14, 2)
+  total       Decimal @db.Decimal(14, 2)
+  position    Int     @default(0)
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@map("invoice_line_items")
+}
+
+model InvoiceNotification {
+  id              String                  @id @default(uuid()) @db.Uuid
+  type            InvoiceNotificationType
+  title           String
+  message         String                  @db.Text
+  invoiceId       String?                 @map("invoice_id") @db.Uuid
+  invoiceClientId String?                 @map("invoice_client_id") @db.Uuid
+  metadata        Json?
+  isRead          Boolean                 @default(false) @map("is_read")
+  createdById     String?                 @map("created_by_id") @db.Uuid
+  createdAt       DateTime                @default(now()) @map("created_at")
+
+  invoice       Invoice?       @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  invoiceClient InvoiceClient? @relation(fields: [invoiceClientId], references: [id], onDelete: SetNull)
+  createdBy     User?          @relation("InvoiceNotificationActor", fields: [createdById], references: [id])
+
+  @@index([isRead, createdAt])
+  @@map("invoice_notifications")
 }
