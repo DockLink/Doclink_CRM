@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { PAGE_ROUTES, pageTitleForPath, pathnameToPage, type UserRole } from "@/lib/types";
-import { useDisplayName, useRole } from "@/lib/role-context";
+import { useCanAccessInvoices, useDisplayName, useRole } from "@/lib/role-context";
 import { clearAllDrafts } from "@/lib/use-form-draft";
 import { onCrmDataChanged } from "@/lib/crm-invalidation";
 import {
@@ -86,6 +86,17 @@ function CalendarIcon({ active }: { active?: boolean }) {
     </svg>
   );
 }
+function InvoiceIcon({ active }: { active?: boolean }) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: active ? "#0E7A70" : "#6B7280" }}>
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <polyline points="14 2 14 8 20 8" />
+      <line x1="8" y1="13" x2="16" y2="13" />
+      <line x1="8" y1="17" x2="16" y2="17" />
+      <line x1="8" y1="9" x2="10" y2="9" />
+    </svg>
+  );
+}
 function ChevronDownIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ color: "#6B7280" }}>
@@ -98,6 +109,13 @@ type NotificationSummary = {
   today: number;
   missed: number;
   upcoming: number;
+};
+
+type InvoiceReminderSummary = {
+  overdue: number;
+  dueToday: number;
+  dueSoon: number;
+  total: number;
 };
 
 function NotificationSummaryIcon({ color }: { color: string }) {
@@ -160,6 +178,7 @@ function initialsOf(name: string) {
 function Sidebar({ role, name, onSignOut }: { role: UserRole; name: string; onSignOut: () => void }) {
   const pathname = usePathname();
   const page = pathnameToPage(pathname);
+  const canAccessInvoices = useCanAccessInvoices();
   const [pipelineOpen, setPipelineOpen] = useState(
     page === "pipeline-kanban" ||
       page === "pipeline-list" ||
@@ -174,6 +193,7 @@ function Sidebar({ role, name, onSignOut }: { role: UserRole; name: string; onSi
     page === "lead-detail" ||
     page === "add-lead" ||
     page === "bulk-import";
+  const isInvoices = page === "invoices" || page === "invoice-detail" || page === "invoice-new";
 
   return (
     <aside
@@ -245,17 +265,27 @@ function Sidebar({ role, name, onSignOut }: { role: UserRole; name: string; onSi
           href={PAGE_ROUTES.followups}
         />
 
-        {role === "superadmin" && (
+        {(role === "superadmin" || canAccessInvoices) && (
           <>
             <div className="pt-4 pb-1.5 px-3">
               <span style={{ fontSize: 10, fontWeight: 600, color: "#9CA3AF", letterSpacing: "0.08em", textTransform: "uppercase" }}>Admin</span>
             </div>
-            <NavItem
-              label="Settings"
-              icon={<SettingsIcon active={page === "settings"} />}
-              active={page === "settings"}
-              href={PAGE_ROUTES.settings}
-            />
+            {canAccessInvoices && (
+              <NavItem
+                label="Invoices"
+                icon={<InvoiceIcon active={isInvoices} />}
+                active={isInvoices}
+                href={PAGE_ROUTES.invoices}
+              />
+            )}
+            {role === "superadmin" && (
+              <NavItem
+                label="Settings"
+                icon={<SettingsIcon active={page === "settings"} />}
+                active={page === "settings"}
+                href={PAGE_ROUTES.settings}
+              />
+            )}
           </>
         )}
       </nav>
@@ -441,7 +471,9 @@ function TopBar({ pageTitle, name, onSignOut }: { pageTitle: string; name: strin
   const [notifOpen, setNotifOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
   const [notificationSummary, setNotificationSummary] = useState<NotificationSummary | null>(null);
+  const [invoiceReminders, setInvoiceReminders] = useState<InvoiceReminderSummary | null>(null);
   const [notificationError, setNotificationError] = useState("");
+  const canAccessInvoices = useCanAccessInvoices();
   const router = useRouter();
 
   const loadNotificationSummary = useCallback(async () => {
@@ -464,7 +496,26 @@ function TopBar({ pageTitle, name, onSignOut }: { pageTitle: string; name: strin
       console.error("Unable to load follow-up notification summary.", error);
       setNotificationError("Unable to load follow-up counts.");
     }
-  }, []);
+
+    if (canAccessInvoices) {
+      try {
+        const response = await fetch("/api/invoices/reminders/summary");
+        const result = await response.json() as InvoiceReminderSummary & { error?: string };
+        if (response.ok) {
+          setInvoiceReminders({
+            overdue: result.overdue ?? 0,
+            dueToday: result.dueToday ?? 0,
+            dueSoon: result.dueSoon ?? 0,
+            total: result.total ?? 0,
+          });
+        }
+      } catch (error) {
+        console.error("Unable to load invoice reminder summary.", error);
+      }
+    } else {
+      setInvoiceReminders(null);
+    }
+  }, [canAccessInvoices]);
 
   useEffect(() => {
     const initialLoad = window.setTimeout(() => {
@@ -480,7 +531,7 @@ function TopBar({ pageTitle, name, onSignOut }: { pageTitle: string; name: strin
   }, [loadNotificationSummary]);
 
   useEffect(() => onCrmDataChanged(
-    ["leads", "followups", "notifications"],
+    ["leads", "followups", "notifications", "invoices"],
     () => void loadNotificationSummary(),
   ), [loadNotificationSummary]);
 
@@ -489,9 +540,15 @@ function TopBar({ pageTitle, name, onSignOut }: { pageTitle: string; name: strin
     router.push(`/followups#${section}`);
   };
 
+  const openInvoices = () => {
+    setNotifOpen(false);
+    router.push("/invoices");
+  };
+
   const totalNotifications = (notificationSummary?.today ?? 0) +
     (notificationSummary?.missed ?? 0) +
-    (notificationSummary?.upcoming ?? 0);
+    (notificationSummary?.upcoming ?? 0) +
+    (invoiceReminders?.total ?? 0);
 
   return (
     <header
@@ -516,11 +573,11 @@ function TopBar({ pageTitle, name, onSignOut }: { pageTitle: string; name: strin
             aria-label="Notifications"
           >
             <BellIcon />
-            {notificationSummary && notificationSummary.missed > 0 && (
+            {((notificationSummary && notificationSummary.missed > 0) || (invoiceReminders && invoiceReminders.overdue > 0)) && (
               <span
                 className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full"
                 style={{ background: "#DC2626", border: "1.5px solid white" }}
-                aria-label={`${notificationSummary.missed} missed follow-ups`}
+                aria-label="Attention needed"
               />
             )}
           </button>
@@ -531,10 +588,10 @@ function TopBar({ pageTitle, name, onSignOut }: { pageTitle: string; name: strin
             >
               <div className="flex items-center justify-between px-4 py-2.5" style={{ borderBottom: "1px solid #E5E7EB" }}>
                 <div>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: "#111111" }}>Follow-up notifications</span>
-                  <p style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>Your current follow-up workload</p>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: "#111111" }}>Notifications</span>
+                  <p style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>Follow-ups and invoice dues</p>
                 </div>
-                {notificationSummary && (
+                {(notificationSummary || invoiceReminders) && (
                   <span style={{ fontSize: 11, fontWeight: 700, color: "#0E7A70", background: "#E3F7F5", borderRadius: 999, padding: "3px 8px" }}>
                     {totalNotifications} total
                   </span>
@@ -568,6 +625,29 @@ function TopBar({ pageTitle, name, onSignOut }: { pageTitle: string; name: strin
                       </span>
                     </button>
                   ))}
+                  {canAccessInvoices && (
+                    <button
+                      type="button"
+                      onClick={openInvoices}
+                      className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-[#F9FAFB] transition-colors"
+                      style={{ background: "transparent", border: "none", cursor: "pointer", borderTop: "1px solid #F3F4F6" }}
+                    >
+                      <span className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: "#FEE2E216" }}>
+                        <NotificationSummaryIcon color="#B91C1C" />
+                      </span>
+                      <span className="flex-1 min-w-0">
+                        <span className="block" style={{ fontSize: 13, fontWeight: 500, color: "#111111" }}>Invoice dues</span>
+                        <span className="block" style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>
+                          {invoiceReminders
+                            ? `${invoiceReminders.overdue} overdue · ${invoiceReminders.dueToday} today · ${invoiceReminders.dueSoon} soon`
+                            : "Loading…"}
+                        </span>
+                      </span>
+                      <span style={{ minWidth: 28, textAlign: "center", fontSize: 13, fontWeight: 700, color: "#B91C1C", background: "#FEE2E2", borderRadius: 999, padding: "4px 7px" }}>
+                        {invoiceReminders?.total ?? "—"}
+                      </span>
+                    </button>
+                  )}
                 </div>
               )}
             </div>

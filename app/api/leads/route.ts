@@ -2,10 +2,11 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { createClient } from "@/lib/supabase/server";
 import { leadAccessWhere } from "@/lib/api-auth";
-import { priorityForStage, type LeadPriority } from "@/lib/lead-ui";
+import { priorityForStage, resolveDisplayFollowUp, type LeadPriority } from "@/lib/lead-ui";
 import { formatMonthlyRevenue, parseYesNo } from "@/lib/lead-custom-fields";
 import { ensureStandardCustomFields } from "@/lib/standard-custom-fields";
 import { CLOSED_LOST_OUTCOME } from "@/lib/lost-reasons";
+import { isValidClientPhone } from "@/lib/client-form-validation";
 import { Prisma } from "../../../generated/prisma/client";
 
 const priorityValues = new Set(["hot", "warm", "cold"]);
@@ -31,6 +32,10 @@ const leadListSelect = {
   priority: true,
   followUpDate: true,
   followUpTime: true,
+  followUpUpdatedAt: true,
+  proposalFollowUpDate: true,
+  proposalFollowUpTime: true,
+  proposalFollowUpUpdatedAt: true,
   createdAt: true,
   stageChangedAt: true,
   stage: { select: { name: true } },
@@ -46,23 +51,8 @@ const leadListSelect = {
 
 type LeadListRow = Prisma.LeadGetPayload<{ select: typeof leadListSelect }>;
 
-function serializeLead(lead: {
-  id: string;
-  company: string;
-  niche: string | null;
-  contact: string | null;
-  phone: string | null;
-  priority: string | null;
-  followUpDate: Date | null;
-  followUpTime: Date | null;
-  stage: { name: string };
-  assignee: { name: string };
-  source: { name: string } | null;
-  createdAt: Date;
-  stageChangedAt: Date | null;
-  _count: { activities: number };
-  activities: { outcome: string; notes: string | null }[];
-}) {
+function serializeLead(lead: LeadListRow) {
+  const display = resolveDisplayFollowUp(lead);
   return {
     id: lead.id,
     company: lead.company,
@@ -70,8 +60,8 @@ function serializeLead(lead: {
     contact: lead.contact ?? "",
     phone: lead.phone ?? "",
     priority: lead.priority,
-    followUpDate: lead.followUpDate?.toISOString() ?? null,
-    followUpTime: lead.followUpTime?.toISOString() ?? null,
+    followUpDate: display.date,
+    followUpTime: display.time,
     stage: lead.stage.name,
     assigneeName: lead.assignee.name,
     source: lead.source?.name ?? "",
@@ -88,6 +78,18 @@ export async function GET(request: Request) {
   if (!profile) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const searchParams = new URL(request.url).searchParams;
+  if (searchParams.get("meta") === "1") {
+    const nicheRows = await prisma.lead.findMany({
+      where: { niche: { not: null }, ...leadAccessWhere(profile) },
+      distinct: ["niche"],
+      select: { niche: true },
+    });
+    const niches = nicheRows
+      .map((row) => row.niche?.trim() ?? "")
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+    return NextResponse.json({ niches });
+  }
   const query = text(searchParams.get("q"));
   const followUpsOnly = searchParams.get("followups") === "1";
   const page = Math.max(1, Number(searchParams.get("page") ?? "1") || 1);
@@ -101,12 +103,29 @@ export async function GET(request: Request) {
   const dateRange = text(searchParams.get("dateRange"));
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+  const dayEnd = new Date(today.getTime() + 24 * 60 * 60 * 1000);
+  const weekEnd = new Date(today.getTime() + 8 * 24 * 60 * 60 * 1000);
   const dateFilter = dateRange === "Overdue"
-    ? { followUpDate: { lt: today } }
+    ? {
+      OR: [
+        { followUpDate: { lt: today } },
+        { proposalFollowUpDate: { lt: today } },
+      ],
+    }
     : dateRange === "Today"
-      ? { followUpDate: { gte: today, lt: new Date(today.getTime() + 24 * 60 * 60 * 1000) } }
+      ? {
+        OR: [
+          { followUpDate: { gte: today, lt: dayEnd } },
+          { proposalFollowUpDate: { gte: today, lt: dayEnd } },
+        ],
+      }
       : dateRange === "Next 7 days"
-        ? { followUpDate: { gte: today, lt: new Date(today.getTime() + 8 * 24 * 60 * 60 * 1000) } }
+        ? {
+          OR: [
+            { followUpDate: { gte: today, lt: weekEnd } },
+            { proposalFollowUpDate: { gte: today, lt: weekEnd } },
+          ],
+        }
         : {};
   const stageFilter = stage
     ? { name: stage }
@@ -116,7 +135,12 @@ export async function GET(request: Request) {
   const where = {
     ...leadAccessWhere(profile),
     ...(followUpsOnly
-      ? { followUpDate: { not: null } }
+      ? {
+        OR: [
+          { followUpDate: { not: null } },
+          { proposalFollowUpDate: { not: null } },
+        ],
+      }
       : {}),
     ...(stageFilter ? { stage: stageFilter } : {}),
     ...(assignee ? { assignee: { name: assignee } } : {}),
@@ -161,7 +185,16 @@ export async function POST(request: Request) {
     proposalSent?: boolean;
   };
   const company = text(body.company);
+  const niche = text(body.niche);
+  const contact = text(body.contact);
+  const phone = text(body.phone);
   if (!company) return NextResponse.json({ error: "Company name is required" }, { status: 400 });
+  if (!niche) return NextResponse.json({ error: "Niche is required" }, { status: 400 });
+  if (!contact) return NextResponse.json({ error: "Contact name is required" }, { status: 400 });
+  if (!phone) return NextResponse.json({ error: "Phone number is required" }, { status: 400 });
+  if (!isValidClientPhone(phone)) {
+    return NextResponse.json({ error: "Enter a valid local or international phone number" }, { status: 400 });
+  }
 
   const stage = await prisma.pipelineStage.findFirst({
     where: { name: text(body.stage) || "New Lead", isActive: true },
@@ -194,9 +227,9 @@ export async function POST(request: Request) {
   const lead = await prisma.lead.create({
     data: {
       company,
-      niche: text(body.niche) || undefined,
-      contact: text(body.contact) || undefined,
-      phone: text(body.phone) || undefined,
+      niche,
+      contact,
+      phone,
       priority,
       sourceId: source?.id,
       stageId: stage.id,
@@ -220,7 +253,16 @@ export async function PATCH(request: Request) {
     : [];
   if (ids.length === 0) return NextResponse.json({ error: "At least one lead id is required" }, { status: 400 });
 
-  const data: { stageId?: string; assigneeId?: string; stageChangedAt?: Date; lostReason?: string | null; priority?: LeadPriority } = {};
+  const data: {
+    stageId?: string;
+    assigneeId?: string;
+    stageChangedAt?: Date;
+    lostReason?: string | null;
+    priority?: LeadPriority;
+    proposalSent?: boolean;
+    proposalSentDate?: Date;
+  } = {};
+  let proposalSentDate: Date | undefined;
   if (body.stage) {
     const stage = await prisma.pipelineStage.findFirst({ where: { name: text(body.stage), isActive: true } });
     if (!stage) return NextResponse.json({ error: "Selected stage was not found" }, { status: 400 });
@@ -228,6 +270,11 @@ export async function PATCH(request: Request) {
     data.stageChangedAt = new Date();
     data.priority = priorityForStage(stage.name);
     data.lostReason = body.stage === "Closed Lost" ? text(body.lostReason) || null : null;
+    if (stage.name === "Proposal Sent") {
+      proposalSentDate = new Date();
+      data.proposalSent = true;
+      data.proposalSentDate = proposalSentDate;
+    }
   }
   const markingLost = Boolean(data.stageId) && body.stage === "Closed Lost";
   if (body.assigneeName) {
@@ -261,6 +308,7 @@ export async function PATCH(request: Request) {
       loggedBy: profile.name,
       createdAt: activity.createdAt.toISOString(),
     })),
+    ...(proposalSentDate ? { proposalSentDate: proposalSentDate.toISOString() } : {}),
   });
 }
 

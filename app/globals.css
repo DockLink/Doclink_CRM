@@ -22,3 +22,23 @@ body {
   color: var(--foreground);
   font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
 }
+
+.invoice-button-feedback button {
+  transition: transform 120ms ease, filter 120ms ease, box-shadow 120ms ease;
+}
+
+.invoice-button-feedback button:active,
+.invoice-button-feedback button[data-clicked="true"] {
+  transform: scale(0.97);
+  filter: brightness(0.92);
+  box-shadow: 0 0 0 3px rgba(47, 190, 179, 0.28);
+}
+
+.invoice-tabs button,
+.invoice-tabs button:focus,
+.invoice-tabs button:focus-visible,
+.invoice-tabs button:active {
+  outline: none;
+  box-shadow: none;
+  border-radius: 0;
+}

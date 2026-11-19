@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { leadAccessWhere, requireProfile } from "@/lib/api-auth";
 import { formatMonthlyRevenue, parseMonthlyRevenue, parseYesNo } from "@/lib/lead-custom-fields";
+import { formatFollowUpScheduleNote } from "@/lib/lead-ui";
 import { ensureStandardCustomFields, standardFieldKey } from "@/lib/standard-custom-fields";
 
 const fieldTypes = {
@@ -95,6 +96,10 @@ export async function GET(
       proposalSentDate: lead.proposalSentDate?.toISOString() ?? null,
       followUpDate: dateInput(lead.followUpDate),
       followUpTime: timeInput(lead.followUpTime),
+      followUpUpdatedAt: lead.followUpUpdatedAt?.toISOString() ?? null,
+      proposalFollowUpDate: dateInput(lead.proposalFollowUpDate),
+      proposalFollowUpTime: timeInput(lead.proposalFollowUpTime),
+      proposalFollowUpUpdatedAt: lead.proposalFollowUpUpdatedAt?.toISOString() ?? null,
       notes: lead.notes ?? "",
       lostReason: lead.lostReason,
       customFields: orderedFields.map((field) => {
@@ -141,18 +146,21 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { profile, response } = await requireProfile(request);
-  if (response) return response;
+  if (response || !profile) return response ?? NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await params;
   const body = await request.json().catch(() => null) as {
     followUpDate?: string | null;
     followUpTime?: string | null;
+    proposalFollowUpDate?: string | null;
+    proposalFollowUpTime?: string | null;
     company?: string;
     niche?: string;
     contact?: string;
     phone?: string;
     source?: string;
     assigneeName?: string;
+    priority?: "hot" | "warm" | "cold";
     proposalSent?: boolean;
     notes?: string | null;
     customFields?: Array<{ id?: string; value?: string | boolean }>;
@@ -162,12 +170,17 @@ export async function PATCH(
   const data: {
     followUpDate?: Date | null;
     followUpTime?: Date | null;
+    followUpUpdatedAt?: Date | null;
+    proposalFollowUpDate?: Date | null;
+    proposalFollowUpTime?: Date | null;
+    proposalFollowUpUpdatedAt?: Date | null;
     company?: string;
     niche?: string | null;
     contact?: string | null;
     phone?: string | null;
     sourceId?: string | null;
     assigneeId?: string;
+    priority?: "hot" | "warm" | "cold";
     proposalSent?: boolean;
     proposalSentDate?: Date | null;
     notes?: string | null;
@@ -192,6 +205,12 @@ export async function PATCH(
     const assignee = await prisma.user.findFirst({ where: { name: text(body.assigneeName), isActive: true } });
     if (!assignee) return NextResponse.json({ error: "Selected assignee was not found" }, { status: 400 });
     data.assigneeId = assignee.id;
+  }
+  if (body.priority !== undefined) {
+    if (!["hot", "warm", "cold"].includes(body.priority)) {
+      return NextResponse.json({ error: "Priority must be hot, warm, or cold" }, { status: 400 });
+    }
+    data.priority = body.priority;
   }
   if (typeof body.proposalSent === "boolean") {
     data.proposalSent = body.proposalSent;
@@ -219,6 +238,31 @@ export async function PATCH(
       if (!parsed) return NextResponse.json({ error: "Follow-up time must be HH:MM" }, { status: 400 });
       data.followUpTime = parsed;
     }
+  }
+  if ("followUpDate" in body || "followUpTime" in body) {
+    data.followUpUpdatedAt = new Date();
+  }
+
+  if ("proposalFollowUpDate" in body) {
+    if (!body.proposalFollowUpDate) {
+      data.proposalFollowUpDate = null;
+    } else {
+      const parsed = dateOnly(body.proposalFollowUpDate);
+      if (!parsed) return NextResponse.json({ error: "Proposal follow-up date must be YYYY-MM-DD" }, { status: 400 });
+      data.proposalFollowUpDate = parsed;
+    }
+  }
+  if ("proposalFollowUpTime" in body) {
+    if (!body.proposalFollowUpTime) {
+      data.proposalFollowUpTime = null;
+    } else {
+      const parsed = timeOnly(body.proposalFollowUpTime);
+      if (!parsed) return NextResponse.json({ error: "Proposal follow-up time must be HH:MM" }, { status: 400 });
+      data.proposalFollowUpTime = parsed;
+    }
+  }
+  if ("proposalFollowUpDate" in body || "proposalFollowUpTime" in body) {
+    data.proposalFollowUpUpdatedAt = new Date();
   }
 
   const customInputs = Array.isArray(body.customFields)
@@ -252,7 +296,10 @@ export async function PATCH(
     customValues.push({ customFieldId: field.id, value });
   }
 
-  const lead = await prisma.$transaction(async (tx) => {
+  const touchingFollowUp = "followUpDate" in body || "followUpTime" in body;
+  const touchingProposalFollowUp = "proposalFollowUpDate" in body || "proposalFollowUpTime" in body;
+
+  const { lead, proposalActivity, followUpActivity } = await prisma.$transaction(async (tx) => {
     for (const { customFieldId, value } of customValues) {
       await tx.leadCustomFieldValue.upsert({
         where: { leadId_customFieldId: { leadId: id, customFieldId } },
@@ -260,16 +307,167 @@ export async function PATCH(
         create: { leadId: id, customFieldId, value },
       });
     }
-    return tx.lead.update({
+    const updated = await tx.lead.update({
       where: { id },
       data,
-      select: { proposalSentDate: true },
+      select: {
+        proposalSentDate: true,
+        followUpDate: true,
+        followUpTime: true,
+        proposalFollowUpDate: true,
+        proposalFollowUpTime: true,
+      },
     });
+
+    let activity: {
+      id: string;
+      outcome: string;
+      notes: string;
+      loggedBy: string;
+      createdAt: Date;
+    } | null = null;
+
+    let scheduledFollowUp: {
+      id: string;
+      outcome: string;
+      notes: string;
+      loggedBy: string;
+      createdAt: Date;
+    } | null = null;
+    if (touchingFollowUp) {
+      const dateStr = dateInput(updated.followUpDate);
+      const timeStr = timeInput(updated.followUpTime);
+      if (dateStr && timeStr) {
+        const notes = formatFollowUpScheduleNote(dateStr, timeStr) ?? `Follow-up scheduled for ${dateStr} at ${timeStr}`;
+        const saved = await tx.activity.create({
+          data: { leadId: id, outcome: "follow_up_scheduled", notes, loggedBy: profile.id },
+          select: {
+            id: true,
+            outcome: true,
+            notes: true,
+            createdAt: true,
+            logger: { select: { name: true } },
+          },
+        });
+        await tx.lead.update({ where: { id }, data: { lastActivityAt: saved.createdAt } });
+        scheduledFollowUp = {
+          id: saved.id,
+          outcome: saved.outcome,
+          notes: saved.notes ?? notes,
+          loggedBy: saved.logger.name,
+          createdAt: saved.createdAt,
+        };
+      }
+    }
+
+    // One Proposal Sent activity with date+time only — update in place, drop duplicates.
+    if (touchingProposalFollowUp) {
+      const dateStr = dateInput(updated.proposalFollowUpDate);
+      const timeStr = timeInput(updated.proposalFollowUpTime);
+      if (dateStr && timeStr) {
+        const notes = formatFollowUpScheduleNote(dateStr, timeStr) ?? `Follow-up scheduled for ${dateStr} at ${timeStr}`;
+        const followUpSaved = await tx.activity.create({
+          data: {
+            leadId: id,
+            outcome: "follow_up_scheduled",
+            notes,
+            loggedBy: profile.id,
+          },
+          select: {
+            id: true,
+            outcome: true,
+            notes: true,
+            createdAt: true,
+            logger: { select: { name: true } },
+          },
+        });
+        scheduledFollowUp = {
+          id: followUpSaved.id,
+          outcome: followUpSaved.outcome,
+          notes: followUpSaved.notes ?? notes,
+          loggedBy: followUpSaved.logger.name,
+          createdAt: followUpSaved.createdAt,
+        };
+        const now = new Date();
+        const latest = await tx.activity.findFirst({
+          where: { leadId: id, outcome: "proposal_sent" },
+          orderBy: { createdAt: "desc" },
+          select: { id: true },
+        });
+        const saved = latest
+          ? await tx.activity.update({
+              where: { id: latest.id },
+              data: { notes, createdAt: now, loggedBy: profile.id },
+              select: {
+                id: true,
+                outcome: true,
+                notes: true,
+                createdAt: true,
+                logger: { select: { name: true } },
+              },
+            })
+          : await tx.activity.create({
+              data: {
+                leadId: id,
+                outcome: "proposal_sent",
+                notes,
+                loggedBy: profile.id,
+              },
+              select: {
+                id: true,
+                outcome: true,
+                notes: true,
+                createdAt: true,
+                logger: { select: { name: true } },
+              },
+            });
+        if (latest) {
+          await tx.activity.deleteMany({
+            where: { leadId: id, outcome: "proposal_sent", id: { not: latest.id } },
+          });
+        }
+        await tx.lead.update({
+          where: { id },
+          data: { lastActivityAt: now },
+        });
+        activity = {
+          id: saved.id,
+          outcome: saved.outcome,
+          notes: saved.notes ?? notes,
+          loggedBy: saved.logger.name,
+          createdAt: saved.createdAt,
+        };
+      }
+    }
+
+    return { lead: updated, proposalActivity: activity, followUpActivity: scheduledFollowUp };
   });
 
   return NextResponse.json({
     id,
     proposalSentDate: lead.proposalSentDate?.toISOString() ?? null,
     customFields: customValues.map(({ customFieldId, value }) => ({ id: customFieldId, value })),
+    ...(proposalActivity
+      ? {
+          activity: {
+            id: proposalActivity.id,
+            outcome: proposalActivity.outcome,
+            notes: proposalActivity.notes,
+            loggedBy: proposalActivity.loggedBy,
+            createdAt: proposalActivity.createdAt.toISOString(),
+          },
+        }
+      : {}),
+    ...(followUpActivity
+      ? {
+          followUpActivity: {
+            id: followUpActivity.id,
+            outcome: followUpActivity.outcome,
+            notes: followUpActivity.notes,
+            loggedBy: followUpActivity.loggedBy,
+            createdAt: followUpActivity.createdAt.toISOString(),
+          },
+        }
+      : {}),
   });
 }

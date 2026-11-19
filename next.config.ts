@@ -5,6 +5,7 @@ import type { NextConfig } from "next";
 loadEnv({ path: path.resolve(process.cwd(), ".env") });
 
 const nextConfig: NextConfig = {
+  serverExternalPackages: ["@react-pdf/renderer"],
   async headers() {
     return [
       {

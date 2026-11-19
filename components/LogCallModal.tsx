@@ -230,6 +230,7 @@ export function LogCallModal({
   const clearDraft = useFormDraft(draftKey, form, { isEmpty: isBlankCallLog });
   const [submitted, setSubmitted] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [saving, setSaving] = useState(false);
 
   // Show optional follow-up for any selected outcome
   const showFollowUp = Boolean(form.outcome);
@@ -245,12 +246,15 @@ export function LogCallModal({
     setSubmitted(true);
     setSaveError("");
     if (!form.outcome) return;
+    setSaving(true);
     try {
       await onSave?.(form);
       clearDraft();
       onClose?.();
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "Unable to save this call.");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -427,12 +431,13 @@ export function LogCallModal({
           <button
             type="button"
             onClick={handleSave}
+            disabled={saving}
             className="rounded-lg font-semibold"
-            style={{ height: 38, paddingInline: 20, fontSize: 13, color: "#FFFFFF", background: "#2FBEB3" }}
+            style={{ height: 38, paddingInline: 20, fontSize: 13, color: "#FFFFFF", background: "#2FBEB3", opacity: saving ? 0.7 : 1 }}
             onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#0E7A70"; }}
             onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#2FBEB3"; }}
           >
-            Save Call Log
+            {saving ? "Saving..." : "Save Call Log"}
           </button>
         </div>
       </div>

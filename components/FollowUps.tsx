@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useMemo, type ReactNode, type CSSProperties } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback, type ReactNode, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import type { UserRole } from "@/lib/types";
@@ -9,7 +9,7 @@ import { stageColor } from "@/lib/pipeline-stages";
 import { usePipelineStages } from "@/lib/use-pipeline-stages";
 import { clearDraft, readDraft, useFormDraft } from "@/lib/use-form-draft";
 import { LogCallModal, type LogCallForm } from "@/components/LogCallModal";
-import { notifyCrmDataChanged } from "@/lib/crm-invalidation";
+import { notifyCrmDataChanged, onCrmDataChanged } from "@/lib/crm-invalidation";
 
 const rescheduleDraftKey = (leadId: string) => `lead:${leadId}:reschedule`;
 
@@ -122,6 +122,7 @@ const OUTCOME_LABEL: Record<string, string> = {
   no_answer: "No Answer",
   callback_requested: "Callback Requested",
   proposal_discussed: "Proposal Discussed",
+  proposal_sent: "Proposal Sent",
   meeting_set: "Meeting Set",
   closed_lost: "Closed Lost",
 };
@@ -625,8 +626,7 @@ export function FollowUps({ role }: { role: UserRole }) {
   const [callLead, setCallLead] = useState<FollowUp | null>(null);
   const [rescheduleLead, setRescheduleLead] = useState<FollowUp | null>(null);
 
-  useEffect(() => {
-    const load = async () => {
+  const load = useCallback(async () => {
       try {
         const response = await fetch("/api/leads?followups=1");
         const result = await response.json() as { leads?: ApiLead[]; error?: string };
@@ -640,9 +640,17 @@ export function FollowUps({ role }: { role: UserRole }) {
       } finally {
         setLoading(false);
       }
-    };
-    void load();
   }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timer);
+  }, [load]);
+
+  useEffect(() => onCrmDataChanged(
+    ["leads", "followups"],
+    () => void load(),
+  ), [load]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {

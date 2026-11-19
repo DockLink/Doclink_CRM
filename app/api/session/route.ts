@@ -15,6 +15,7 @@ export async function GET(request: Request) {
       id: profile.id,
       name: profile.name,
       role: profile.role,
+      canAccessInvoices: profile.role === "superadmin" || profile.canAccessInvoices,
     },
   });
 }

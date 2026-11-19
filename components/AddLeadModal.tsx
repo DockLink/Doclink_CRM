@@ -8,6 +8,7 @@ import { priorityForStage } from "@/lib/lead-ui";
 import { REVENUE_CURRENCIES, YES_NO_OPTIONS, type RevenueCurrency, type YesNo } from "@/lib/lead-custom-fields";
 import { readDraft, useFormDraft } from "@/lib/use-form-draft";
 import { notifyCrmDataChanged } from "@/lib/crm-invalidation";
+import { isValidClientPhone } from "@/lib/client-form-validation";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -30,6 +31,9 @@ interface LeadForm {
 
 interface FormErrors {
   company?: string;
+  niche?: string;
+  contact?: string;
+  phone?: string;
 }
 
 interface AssignableUser {
@@ -38,14 +42,6 @@ interface AssignableUser {
   initials: string;
   color: string;
 }
-
-// ─── Seed data ────────────────────────────────────────────────────────────────
-
-const NICHES = [
-  "Enterprise SaaS", "Healthcare", "Agency", "Deep Tech", "Infrastructure",
-  "Fintech", "Clean Energy", "Consulting", "Real Estate", "Investment",
-  "Logistics", "Retail", "Marketing", "Pharma",
-];
 
 const SOURCES = ["Referral", "Website", "Cold Call", "LinkedIn", "Trade Show", "Email Campaign", "Partner", "Event"];
 
@@ -75,6 +71,16 @@ const NEW_LEAD_DRAFT_KEY = "lead:new";
 function isBlankLeadForm(form: LeadForm) {
   return !form.company.trim() && !form.niche && !form.contact.trim() && !form.phone.trim() && !form.source
     && !form.revenueAmount && !form.discoveryCall && !form.proposalSent;
+}
+
+function validateLeadForm(form: LeadForm): FormErrors {
+  const errors: FormErrors = {};
+  if (!form.company.trim()) errors.company = "Company name is required";
+  if (!form.niche.trim()) errors.niche = "Niche is required";
+  if (!form.contact.trim()) errors.contact = "Contact name is required";
+  if (!form.phone.trim()) errors.phone = "Phone number is required";
+  else if (!isValidClientPhone(form.phone)) errors.phone = "Enter a valid local or international phone number";
+  return errors;
 }
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
@@ -232,11 +238,25 @@ function SelectInput({
 // Niche select with "+ Add new" option
 function NicheSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const [open, setOpen] = useState(false);
-  const [niches, setNiches] = useState(NICHES);
+  const [niches, setNiches] = useState<string[]>([]);
   const [newNiche, setNewNiche] = useState("");
   const [addingNew, setAddingNew] = useState(false);
   const [focused, setFocused] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const loadNiches = async () => {
+      try {
+        const response = await fetch("/api/leads?meta=1");
+        const result = await response.json() as { niches?: string[] };
+        if (!response.ok) return;
+        setNiches(result.niches ?? []);
+      } catch {
+        setNiches([]);
+      }
+    };
+    void loadNiches();
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -345,7 +365,7 @@ export function AddLeadModal({ mode = "add", role, showValidation = false, onClo
   const [assignees, setAssignees] = useState<AssignableUser[]>([]);
   const { stages } = usePipelineStages();
   const stageOptions = activeStages(stages);
-  const [errors, setErrors] = useState<FormErrors>(showValidation ? { company: "Company name is required" } : {});
+  const [errors, setErrors] = useState<FormErrors>(() => showValidation ? validateLeadForm(form) : {});
   const [submitted, setSubmitted] = useState(showValidation);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
@@ -386,15 +406,20 @@ export function AddLeadModal({ mode = "add", role, showValidation = false, onClo
       [key]: val,
       ...(key === "stage" ? { priority: priorityForStage(val as string) } : {}),
     }));
-    if (key === "company" && submitted) {
-      setErrors((prev) => ({ ...prev, company: val ? undefined : "Company name is required" }));
+    if (submitted && (key === "company" || key === "niche" || key === "contact" || key === "phone")) {
+      const value = String(val).trim();
+      const error = !value
+        ? `${key === "company" ? "Company name" : key === "contact" ? "Contact name" : key === "phone" ? "Phone number" : "Niche"} is required`
+        : key === "phone" && !isValidClientPhone(value)
+          ? "Enter a valid local or international phone number"
+          : undefined;
+      setErrors((prev) => ({ ...prev, [key]: error }));
     }
   };
 
   const handleSave = async () => {
     setSubmitted(true);
-    const newErrors: FormErrors = {};
-    if (!form.company.trim()) newErrors.company = "Company name is required";
+    const newErrors = validateLeadForm(form);
     setErrors(newErrors);
     if (Object.keys(newErrors).length > 0 || mode === "edit") return;
 
@@ -489,20 +514,21 @@ export function AddLeadModal({ mode = "add", role, showValidation = false, onClo
 
           {/* Niche */}
           <div>
-            <Label>Niche</Label>
+            <Label required>Niche</Label>
             <NicheSelect value={form.niche} onChange={(v) => set("niche", v)} />
+            {errors.niche && <p className="mt-1.5" style={{ fontSize: 12, color: "#DC2626" }}>{errors.niche}</p>}
           </div>
 
           {/* Contact Name */}
           <div>
-            <Label>Contact Name</Label>
-            <TextInput value={form.contact} onChange={(v) => set("contact", v)} placeholder="e.g. Sarah Blake" />
+            <Label required>Contact Name</Label>
+            <TextInput value={form.contact} onChange={(v) => set("contact", v)} placeholder="e.g. Sarah Blake" error={errors.contact} />
           </div>
 
           {/* Phone */}
           <div>
-            <Label>Phone</Label>
-            <TextInput value={form.phone} onChange={(v) => set("phone", v)} placeholder="+1 555 000 0000" />
+            <Label required>Phone</Label>
+            <TextInput value={form.phone} onChange={(v) => set("phone", v)} placeholder="+1 555 000 0000" error={errors.phone} />
           </div>
 
           {/* Source */}

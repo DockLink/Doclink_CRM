@@ -7,7 +7,7 @@ import type { UserRole } from "@/lib/types";
 import { assigneeColor, displayDate, displayTime, initials, type ApiLead, urgencyFor } from "@/lib/lead-ui";
 import { activeStages, stageColor, type PipelineStage } from "@/lib/pipeline-stages";
 import { usePipelineStages } from "@/lib/use-pipeline-stages";
-import { notifyCrmDataChanged } from "@/lib/crm-invalidation";
+import { notifyCrmDataChanged, onCrmDataChanged } from "@/lib/crm-invalidation";
 
 // ─── Palette ──────────────────────────────────────────────────────────────────
 
@@ -94,12 +94,14 @@ function FilterPill({
   value,
   onChange,
   renderOption,
+  scrollable = false,
 }: {
   label: string;
   options: string[];
   value: string | null;
   onChange: (v: string | null) => void;
   renderOption?: (o: string) => ReactNode;
+  scrollable?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -140,7 +142,13 @@ function FilterPill({
       {open && (
         <div
           className="absolute top-full mt-1 rounded-xl shadow-xl border py-1.5 z-50"
-          style={{ background: "#FFFFFF", borderColor: "#E5E7EB", minWidth: 180, left: 0 }}
+          style={{
+            background: "#FFFFFF",
+            borderColor: "#E5E7EB",
+            minWidth: 180,
+            left: 0,
+            ...(scrollable ? { maxHeight: 240, overflowY: "auto" as const } : {}),
+          }}
         >
           {options.map((opt) => (
             <button
@@ -390,6 +398,7 @@ function FilterBar({
   filters,
   stages,
   assignees,
+  niches,
   setFilter,
   search,
   setSearch,
@@ -397,12 +406,12 @@ function FilterBar({
   filters: Record<string, string | null>;
   stages: PipelineStage[];
   assignees: AssignableUser[];
+  niches: string[];
   setFilter: (key: string, val: string | null) => void;
   search: string;
   setSearch: (v: string) => void;
 }) {
   const assigneeOptions = assignees.map((assignee) => assignee.name);
-  const NICHES    = ["Enterprise SaaS", "Healthcare", "Agency", "Deep Tech", "Infrastructure", "Marketing", "Fintech", "Pharma", "Logistics", "Real Estate", "Consulting", "Investment", "SaaS", "Clean Energy", "Retail", "Media"];
   const PRIORITIES = ["hot", "warm", "cold"];
   const RANGES     = ["Today", "This week", "Next 7 days", "This month", "Overdue"];
 
@@ -421,8 +430,9 @@ function FilterBar({
         onChange={(v) => setFilter("assignee", v)}
       />
       <FilterPill
-        label="Niche" options={NICHES} value={filters.niche ?? null}
+        label="Niche" options={niches} value={filters.niche ?? null}
         onChange={(v) => setFilter("niche", v)}
+        scrollable
       />
       <FilterPill
         label="Priority" options={PRIORITIES} value={filters.priority ?? null}
@@ -461,6 +471,7 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
   const { stages } = usePipelineStages();
   const [leads, setLeads] = useState<ListLead[]>([]);
   const [assignees, setAssignees] = useState<AssignableUser[]>([]);
+  const [niches, setNiches] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [filters, setFiltersState] = useState<Record<string, string | null>>({
@@ -471,6 +482,7 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
   const [page, setPage]         = useState(1);
   const [total, setTotal]       = useState(0);
   const [totalPages, setTotalPages] = useState(1);
+  const [refreshVersion, setRefreshVersion] = useState(0);
   const goToLastPage = useRef(false);
 
   useEffect(() => {
@@ -533,7 +545,12 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
     void loadLeads();
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [filters, page, search]);
+  }, [filters, page, search, refreshVersion]);
+
+  useEffect(() => onCrmDataChanged(
+    ["leads"],
+    () => setRefreshVersion((version) => version + 1),
+  ), []);
 
   useEffect(() => {
     const loadAssignees = async () => {
@@ -548,6 +565,20 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
     };
     void loadAssignees();
   }, []);
+
+  useEffect(() => {
+    const loadNiches = async () => {
+      try {
+        const response = await fetch("/api/leads?meta=1");
+        const result = await response.json() as { niches?: string[] };
+        if (!response.ok) return;
+        setNiches(result.niches ?? []);
+      } catch {
+        setNiches([]);
+      }
+    };
+    void loadNiches();
+  }, [refreshVersion]);
 
   const setFilter = (key: string, val: string | null) => {
     setPage(1);
@@ -624,7 +655,7 @@ export function PipelineList({ role, forceBulk }: { role: UserRole; forceBulk?: 
   return (
     <div className="flex flex-col" style={{ height: "calc(100vh - 64px)" }}>
       <ListTopBar role={role} />
-      <FilterBar filters={filters} stages={stages} assignees={assignees} setFilter={setFilter} search={search} setSearch={setSearch} />
+      <FilterBar filters={filters} stages={stages} assignees={assignees} niches={niches} setFilter={setFilter} search={search} setSearch={setSearch} />
 
       {/* Table container */}
       <div className="flex-1 overflow-auto" style={{ padding: "16px 20px 80px" }}>

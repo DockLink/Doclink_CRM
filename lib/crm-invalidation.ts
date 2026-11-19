@@ -1,4 +1,4 @@
-export type CrmDataKey = "leads" | "followups" | "dashboard" | "notifications";
+export type CrmDataKey = "leads" | "followups" | "dashboard" | "notifications" | "invoices";
 
 const EVENT_NAME = "crm:data-changed";
 
