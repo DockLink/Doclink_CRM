@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { readDraft, useFormDraft } from "@/lib/use-form-draft";
 
 type Account = {
   accountType: "savings" | "current";
@@ -19,14 +20,19 @@ const emptyAccounts = (): Account[] => [
 ];
 
 export function InvoiceSettingsPanel({ embedded = false }: { embedded?: boolean }) {
-  const [accounts, setAccounts] = useState<Account[]>(emptyAccounts);
+  const draftKey = "invoice-settings:payment-accounts";
+  const [accounts, setAccounts] = useState<Account[]>(() => readDraft<Account[]>(draftKey) ?? emptyAccounts());
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const clearAccountsDraft = useFormDraft(draftKey, accounts, {
+    isEmpty: (value) => value.every((account) => !account.bankName && !account.branch && !account.accountName && !account.accountNumber),
+  });
 
   useEffect(() => {
     void fetch("/api/invoice-settings").then(async (response) => {
       const result = await response.json() as { settings?: Settings };
-      if (response.ok && result.settings?.paymentAccounts) {
+      if (response.ok && result.settings?.paymentAccounts && !readDraft<Account[]>(draftKey)) {
         setAccounts((current) => current.map((account) => {
           const found = result.settings?.paymentAccounts?.find((item) => item.accountType === account.accountType);
           if (!found) return account;
@@ -48,19 +54,27 @@ export function InvoiceSettingsPanel({ embedded = false }: { embedded?: boolean 
   };
 
   const save = async () => {
+    setSaving(true);
     setError("");
     setMessage("");
-    const response = await fetch("/api/invoice-settings", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ paymentAccounts: accounts }),
-    });
-    const result = await response.json() as { error?: string };
-    if (!response.ok) {
-      setError(result.error ?? "Unable to save invoice payment accounts.");
-      return;
+    try {
+      const response = await fetch("/api/invoice-settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paymentAccounts: accounts }),
+      });
+      const result = await response.json() as { error?: string };
+      if (!response.ok) {
+        setError(result.error ?? "Unable to save invoice payment accounts.");
+        return;
+      }
+      clearAccountsDraft();
+      setMessage("Payment accounts saved.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to save invoice payment accounts.");
+    } finally {
+      setSaving(false);
     }
-    setMessage("Payment accounts saved.");
   };
 
   return (
@@ -96,7 +110,7 @@ export function InvoiceSettingsPanel({ embedded = false }: { embedded?: boolean 
           </div>
         ))}
       </div>
-      <button type="button" onClick={() => void save()} className="rounded-lg px-4 font-semibold" style={{ alignSelf: "flex-start", height: 36, background: "#2FBEB3", color: "#FFFFFF", border: "none" }}>Save accounts</button>
+      <button type="button" disabled={saving} onClick={() => void save()} className="rounded-lg px-4 font-semibold" style={{ alignSelf: "flex-start", height: 36, background: "#2FBEB3", color: "#FFFFFF", border: "none", cursor: "pointer", opacity: saving ? 0.7 : 1 }}>{saving ? "Processing" : "Save accounts"}</button>
       {error && <p style={{ color: "#DC2626", fontSize: 12 }}>{error}</p>}
       {message && <p style={{ color: "#15803D", fontSize: 12 }}>{message}</p>}
     </div>

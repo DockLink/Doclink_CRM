@@ -3,9 +3,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { formatMoney } from "@/lib/invoice-format";
+import { isRequiredClientField, isValidClientPhone, REQUIRED_CLIENT_FIELDS } from "@/lib/client-form-validation";
 
 export type ClientFolderSummary = {
   id: string;
+  clientName: string;
   company: string;
   contact: string | null;
   invoiceCount: number;
@@ -21,10 +23,11 @@ export function ClientInvoiceFolders() {
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [addClientProcessing, setAddClientProcessing] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [form, setForm] = useState({
     clientName: "",
     companyName: "",
-    contactPerson: "",
     email: "",
     phone: "",
     billingAddress: "",
@@ -60,13 +63,26 @@ export function ClientInvoiceFolders() {
     if (!needle) return clients;
     return clients.filter((client) =>
       client.company.toLowerCase().includes(needle)
-      || (client.contact ?? "").toLowerCase().includes(needle),
+      || client.clientName.toLowerCase().includes(needle),
     );
   }, [clients, query]);
 
   const createClient = async () => {
-    setSaving(true);
     setError("");
+    const errors: Record<string, string> = {};
+    for (const field of REQUIRED_CLIENT_FIELDS) {
+      if (!form[field].trim()) errors[field] = "This field is required.";
+    }
+    if (form.phone.trim() && !isValidClientPhone(form.phone)) {
+      errors.phone = "Enter a valid Sri Lankan or international phone number.";
+    }
+    if (Object.keys(errors).length > 0) {
+      setFieldErrors(errors);
+      return;
+    }
+
+    setSaving(true);
+    setFieldErrors({});
     try {
       const response = await fetch("/api/invoices/clients", {
         method: "POST",
@@ -79,7 +95,6 @@ export function ClientInvoiceFolders() {
       setForm({
         clientName: "",
         companyName: "",
-        contactPerson: "",
         email: "",
         phone: "",
         billingAddress: "",
@@ -104,16 +119,20 @@ export function ClientInvoiceFolders() {
         <div>
           <h3 style={{ fontSize: 18, fontWeight: 700, color: "#111111" }}>Invoice Clients</h3>
           <p style={{ fontSize: 13, color: "#6B7280", marginTop: 4 }}>
-            Independent billing clients (not CRM leads). Open a folder for invoices and payments.
+            Open a folder for invoices and payments.
           </p>
         </div>
         <button
           type="button"
-          onClick={() => setShowForm((value) => !value)}
+          onClick={() => {
+            setAddClientProcessing(true);
+            setShowForm((value) => !value);
+            window.setTimeout(() => setAddClientProcessing(false), 900);
+          }}
           className="rounded-lg px-4 font-semibold"
-          style={{ height: 36, background: "#2FBEB3", color: "#FFFFFF", border: "none", fontSize: 13 }}
+          style={{ height: 36, background: "#2FBEB3", color: "#FFFFFF", border: "none", fontSize: 13, cursor: "pointer" }}
         >
-          {showForm ? "Close form" : "Add client"}
+          {addClientProcessing ? "Processing" : showForm ? "Close form" : "Add client"}
         </button>
       </div>
 
@@ -122,7 +141,6 @@ export function ClientInvoiceFolders() {
           {([
             ["clientName", "Client name"],
             ["companyName", "Company name"],
-            ["contactPerson", "Contact person"],
             ["email", "Email"],
             ["phone", "Phone"],
             ["billingAddress", "Billing address"],
@@ -131,12 +149,22 @@ export function ClientInvoiceFolders() {
             ["postalCode", "Postal code"],
           ] as const).map(([field, label]) => (
             <label key={field} style={{ fontSize: 12, color: "#6B7280" }}>
-              {label}
+              {label}{isRequiredClientField(field) && <span style={{ color: "#DC2626" }}> *</span>}
               <input
                 value={form[field]}
-                onChange={(e) => setForm((current) => ({ ...current, [field]: e.target.value }))}
-                style={{ display: "block", width: "100%", height: 36, marginTop: 5, border: "1px solid #E3E7EF", borderRadius: 8, padding: "0 10px" }}
+                aria-invalid={Boolean(fieldErrors[field])}
+                onChange={(e) => {
+                  setForm((current) => ({ ...current, [field]: e.target.value }));
+                  setFieldErrors((current) => {
+                    if (!current[field]) return current;
+                    const next = { ...current };
+                    delete next[field];
+                    return next;
+                  });
+                }}
+                style={{ display: "block", width: "100%", height: 36, marginTop: 5, border: `1px solid ${fieldErrors[field] ? "#DC2626" : "#E3E7EF"}`, borderRadius: 8, padding: "0 10px" }}
               />
+              {fieldErrors[field] && <span style={{ display: "block", marginTop: 4, color: "#DC2626" }}>{fieldErrors[field]}</span>}
             </label>
           ))}
           <label style={{ fontSize: 12, color: "#6B7280" }}>
@@ -223,7 +251,7 @@ export function ClientInvoiceFolders() {
               </div>
               <div className="min-w-0">
                 <div style={{ fontSize: 15, fontWeight: 700, color: "#111111" }}>{client.company}</div>
-                <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>{client.contact ?? "—"}</div>
+                <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>{client.clientName}</div>
                 <div style={{ fontSize: 12, color: "#0E7A70", fontWeight: 600, marginTop: 6 }}>
                   {client.invoiceCount} Invoice{client.invoiceCount === 1 ? "" : "s"}
                 </div>

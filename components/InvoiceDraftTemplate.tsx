@@ -358,7 +358,6 @@ export function InvoiceDraftTemplate({
                 onChange={(e) => onChange({ currency: e.target.value })}
               >
                 <option value="LKR">LKR</option>
-                <option value="USD">USD</option>
               </select>
             </Field>
           </div>
@@ -378,22 +377,31 @@ export function InvoiceDraftTemplate({
             <input
               style={{ ...style, maxWidth: 200 }}
               disabled={readOnly}
-              type="number"
-              min={0}
-              step="0.01"
+              type="text"
+              inputMode="decimal"
               value={values.discountPercent}
-              onChange={(e) => onChange({ discountPercent: e.target.value })}
+              onFocus={(e) => {
+                if (values.discountPercent === "0") {
+                  onChange({ discountPercent: "" });
+                  e.currentTarget.select();
+                }
+              }}
+              onBlur={() => {
+                if (values.discountPercent === "") {
+                  onChange({ discountPercent: "0" });
+                }
+              }}
+              onChange={(e) => onChange({
+                discountPercent: e.target.value.replace(/^0+(?=\d)/, ""),
+              })}
             />
-            {Number(values.discountPercent) > 100 && (
-              <div style={{ color: "#B91C1C", fontSize: 11, marginTop: 4 }}>Discount percentage must be between 0 and 100</div>
-            )}
           </Field>
           <div style={{ fontSize: 13, color: INK, minWidth: 220 }}>
             <div className="flex justify-between gap-8 py-1">
               <span>Subtotal:</span>
               <span style={{ fontWeight: 700 }}>{formatMoney(totals.subtotal, values.currency)}</span>
             </div>
-            {Number(values.discountPercent) > 0 && Number(values.discountPercent) <= 100 && (
+            {Number(values.discountPercent) > 0 && Number(values.discountPercent) <= 20 && (
               <div className="flex justify-between gap-8 py-1">
                 <span>Discount ({values.discountPercent}%):</span>
                 <span style={{ fontWeight: 700 }}>-{formatMoney(totals.discountAmount, values.currency)}</span>

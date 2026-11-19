@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { checkRateLimit, requireProfile, requireInvoiceAccess } from "@/lib/api-auth";
 import { money, serializeInvoiceClient, toNumber } from "@/lib/invoice-utils";
+import { isValidClientPhone } from "@/lib/client-form-validation";
 
 export async function GET(request: Request) {
   const limited = checkRateLimit(request, "invoice-clients");
@@ -32,7 +33,7 @@ export async function GET(request: Request) {
         select: { total: true, amountPaid: true, status: true },
       },
     },
-    orderBy: { companyName: "asc" },
+    orderBy: [{ createdAt: "desc" }, { companyName: "asc" }],
   });
 
   return NextResponse.json({
@@ -80,10 +81,20 @@ export async function POST(request: Request) {
 
   const clientName = body.clientName?.trim() ?? "";
   const companyName = body.companyName?.trim() ?? "";
-  if (!clientName || !companyName) {
-    return NextResponse.json({ error: "Client name and company name are required" }, { status: 400 });
+  const billingAddress = body.billingAddress?.trim() ?? "";
+  const city = body.city?.trim() ?? "";
+  const phone = body.phone?.trim() ?? "";
+  if (!clientName || !companyName || !billingAddress || !city || !phone) {
+    return NextResponse.json(
+      { error: "Client name, company name, billing address, city, and telephone number are required" },
+      { status: 400 },
+    );
+  }
+  if (!isValidClientPhone(phone)) {
+    return NextResponse.json({ error: "Enter a valid Sri Lankan or international phone number." }, { status: 400 });
   }
 
+  const billingType = body.billingType ?? "one_time_development";
   const created = await prisma.invoiceClient.create({
     data: {
       id: crypto.randomUUID(),
@@ -97,9 +108,21 @@ export async function POST(request: Request) {
       country: body.country?.trim() || null,
       postalCode: body.postalCode?.trim() || null,
       clientType: body.clientType === "existing" ? "existing" : "new",
-      billingType: body.billingType ?? "one_time_development",
+      billingType,
       notes: body.notes?.trim() || null,
       createdById: profile.id,
+      ...(billingType === "monthly_retainer" || billingType === "both"
+        ? {
+            recurringConfig: {
+              create: {
+                id: crypto.randomUUID(),
+                billingFrequency: "monthly",
+                billingDay: 1,
+                status: "active",
+              },
+            },
+          }
+        : {}),
     },
     include: { recurringConfig: true },
   });

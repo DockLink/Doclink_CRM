@@ -63,7 +63,7 @@ export async function POST(request: Request) {
   const client = await prisma.invoiceClient.findUnique({ where: { id: invoiceClientId } });
   if (!client) return NextResponse.json({ error: "Invoice client not found" }, { status: 404 });
 
-  const billingDay = Math.min(Math.max(Math.floor(body.billingDay || 1), 1), 28);
+  const billingDay = Math.min(Math.max(Math.floor(body.billingDay || 1), 1), 31);
   const monthlyItems = (body.monthlyItems ?? [])
     .filter((item) => item.description?.trim())
     .map((item) => ({

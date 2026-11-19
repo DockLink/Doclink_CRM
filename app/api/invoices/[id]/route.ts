@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { checkRateLimit, requireProfile, requireInvoiceAccess } from "@/lib/api-auth";
 import {
   billingMonthFromDate,
+  calculateDaysLate,
   computeInvoiceTotals,
   computeLineTotal,
   parseDateOnly,
@@ -110,6 +111,40 @@ export async function PATCH(request: Request, { params }: Params) {
       where: { id },
       data: { status: "void" },
       include: invoiceInclude,
+    });
+    return NextResponse.json({ invoice: serializeInvoice(updated) });
+  }
+
+  if (body.status === "paid") {
+    if (existing.status !== "sent" && existing.status !== "part_paid") {
+      return NextResponse.json({ error: "Only sent or part-paid invoices can be marked as paid" }, { status: 400 });
+    }
+    const paidAt = new Date();
+    const outstanding = Math.max(0, toNumber(existing.total) - toNumber(existing.amountPaid));
+    const updated = await prisma.$transaction(async (tx) => {
+      if (outstanding > 0) {
+        await tx.invoicePayment.create({
+          data: {
+            id: crypto.randomUUID(),
+            invoiceId: id,
+            amount: outstanding,
+            paymentDate: paidAt,
+            daysLate: calculateDaysLate(existing.dueDate, paidAt),
+            notes: "Marked paid",
+            createdById: profile.id,
+          },
+        });
+      }
+      return tx.invoice.update({
+        where: { id },
+        data: {
+          status: "paid",
+          amountPaid: existing.total,
+          paidAt,
+          daysLate: calculateDaysLate(existing.dueDate, paidAt),
+        },
+        include: invoiceInclude,
+      });
     });
     return NextResponse.json({ invoice: serializeInvoice(updated) });
   }

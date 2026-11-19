@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { checkRateLimit, requireInvoiceAccess, requireProfile } from "@/lib/api-auth";
 import { serializeInvoice, serializeInvoiceClient, toNumber } from "@/lib/invoice-utils";
+import { isValidClientPhone } from "@/lib/client-form-validation";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -117,6 +118,25 @@ export async function PATCH(request: Request, { params }: Params) {
     billingType?: "one_time_development" | "monthly_retainer" | "both";
     notes?: string | null;
   };
+
+  if (body.clientName !== undefined && !body.clientName.trim()) {
+    return NextResponse.json({ error: "Client name is required" }, { status: 400 });
+  }
+  if (body.companyName !== undefined && !body.companyName.trim()) {
+    return NextResponse.json({ error: "Company name is required" }, { status: 400 });
+  }
+  if (body.billingAddress !== undefined && !body.billingAddress?.trim()) {
+    return NextResponse.json({ error: "Billing address is required" }, { status: 400 });
+  }
+  if (body.city !== undefined && !body.city?.trim()) {
+    return NextResponse.json({ error: "City is required" }, { status: 400 });
+  }
+  if (body.phone !== undefined && !body.phone?.trim()) {
+    return NextResponse.json({ error: "Telephone number is required" }, { status: 400 });
+  }
+  if (body.phone?.trim() && !isValidClientPhone(body.phone)) {
+    return NextResponse.json({ error: "Enter a valid Sri Lankan or international phone number." }, { status: 400 });
+  }
 
   const updated = await prisma.invoiceClient.update({
     where: { id },

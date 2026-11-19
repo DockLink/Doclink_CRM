@@ -3,6 +3,7 @@
 import { Suspense } from "react";
 import { Invoices } from "@/components/Invoices";
 import { useCanAccessInvoices } from "@/lib/role-context";
+import { InvoiceButtonFeedback } from "@/components/InvoiceButtonFeedback";
 
 function InvoicesGate() {
   const canAccess = useCanAccessInvoices();
@@ -14,9 +15,11 @@ function InvoicesGate() {
     );
   }
   return (
+    <InvoiceButtonFeedback>
     <Suspense fallback={<div style={{ padding: 24, fontSize: 13, color: "#6B7280" }}>Loading invoices…</div>}>
       <Invoices />
     </Suspense>
+    </InvoiceButtonFeedback>
   );
 }
 

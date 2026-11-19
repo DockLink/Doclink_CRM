@@ -26,8 +26,8 @@ export function computeLineTotal(qty: number, unitPrice: number) {
 }
 
 export function validateDiscountPercent(discountPercent: number) {
-  if (!Number.isFinite(discountPercent) || discountPercent < 0 || discountPercent > 100) {
-    return "Discount percentage must be between 0 and 100";
+  if (!Number.isFinite(discountPercent) || discountPercent < 0 || discountPercent > 20) {
+    return "Discount percentage must be between 0 and 20";
   }
   return null;
 }
@@ -36,7 +36,7 @@ export function computeInvoiceTotals(
   lines: Array<{ qty: number; unitPrice: number }>,
   discountPercent = 0,
 ) {
-  const safePercent = Math.min(Math.max(discountPercent, 0), 100);
+  const safePercent = Math.min(Math.max(discountPercent, 0), 20);
   const subtotal = Math.round(
     lines.reduce((sum, line) => sum + computeLineTotal(line.qty, line.unitPrice), 0) * 100,
   ) / 100;
@@ -65,13 +65,15 @@ export function toDateInput(value: Date | string | null | undefined) {
 }
 
 export function nextBillingDate(preferredDay: number | null | undefined, from = new Date()) {
-  const day = Math.min(Math.max(Math.floor(preferredDay || 1), 1), 28);
+  const day = Math.min(Math.max(Math.floor(preferredDay || 1), 1), 31);
   const year = from.getFullYear();
   const month = from.getMonth();
-  const candidate = new Date(Date.UTC(year, month, day));
+  const candidateDay = Math.min(day, new Date(Date.UTC(year, month + 1, 0)).getUTCDate());
+  const candidate = new Date(Date.UTC(year, month, candidateDay));
   const today = new Date(Date.UTC(from.getFullYear(), from.getMonth(), from.getDate()));
   if (candidate >= today) return candidate;
-  return new Date(Date.UTC(year, month + 1, day));
+  const nextCandidateDay = Math.min(day, new Date(Date.UTC(year, month + 2, 0)).getUTCDate());
+  return new Date(Date.UTC(year, month + 1, nextCandidateDay));
 }
 
 export function formatInvoiceNumber(sequence: number) {
@@ -112,6 +114,8 @@ export function displayStatusLabel(status: string) {
       return "Void";
     case "overdue":
       return "Overdue";
+    case "dismiss":
+      return "Dismiss";
     default:
       return status.replace(/_/g, " ");
   }

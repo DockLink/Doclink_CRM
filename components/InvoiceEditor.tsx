@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { notifyCrmDataChanged } from "@/lib/crm-invalidation";
 import { displayStatusLabel, validateDiscountPercent } from "@/lib/invoice-format";
+import { readDraft, useFormDraft } from "@/lib/use-form-draft";
 import {
   InvoiceDraftTemplate,
   type InvoiceDraftValues,
@@ -31,6 +32,8 @@ type Invoice = {
   subtotal: string;
   discountPercent: string;
   total: string;
+  amountPaid?: string;
+  outstanding?: string;
   daysLate?: number;
   billToName: string | null;
   billToCompany: string | null;
@@ -98,6 +101,8 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 }
 
 function emptyDraftValues(settings?: CompanySettings | null): InvoiceDraftValues {
+  const savingsAccount = settings?.paymentAccounts?.find((account) => account.accountType === "savings" && account.isActive);
+
   return {
     invoiceNumber: null,
     clientType: "new",
@@ -110,10 +115,10 @@ function emptyDraftValues(settings?: CompanySettings | null): InvoiceDraftValues
     billToLine2: "",
     billToCity: "",
     billToPostal: "",
-    bankName: settings?.defaultBankName ?? "",
-    accountName: settings?.defaultAccountName ?? "",
-    accountNumber: settings?.defaultAccountNumber ?? "",
-    paymentAccountType: null,
+    bankName: savingsAccount?.bankName ?? settings?.defaultBankName ?? "",
+    accountName: savingsAccount?.accountName ?? settings?.defaultAccountName ?? "",
+    accountNumber: savingsAccount?.accountNumber ?? settings?.defaultAccountNumber ?? "",
+    paymentAccountType: savingsAccount ? "savings" : null,
     paymentAccounts: settings?.paymentAccounts?.filter((account) => account.isActive) ?? [],
     discountPercent: "0",
     lineItems: [{ description: "", qty: 1, unitPrice: "" }],
@@ -128,31 +133,46 @@ function emptyDraftValues(settings?: CompanySettings | null): InvoiceDraftValues
 export function InvoiceCreate({ initialLeadId, initialClientId }: { initialLeadId?: string; initialClientId?: string }) {
   const router = useRouter();
   const initialId = initialClientId ?? initialLeadId ?? "";
+  const draftKey = `invoice:new:${initialId || "blank"}`;
+  const [restoredDraft] = useState(() => readDraft<{ clientId: string; values: InvoiceDraftValues }>(draftKey));
   const [clients, setClients] = useState<InvoiceClientOption[]>([]);
-  const [clientId, setClientId] = useState(initialId);
+  const [clientId, setClientId] = useState(restoredDraft?.clientId ?? initialId);
   const [settings, setSettings] = useState<CompanySettings | null>(null);
-  const [values, setValues] = useState<InvoiceDraftValues>(() => emptyDraftValues());
+  const [values, setValues] = useState<InvoiceDraftValues>(() => restoredDraft?.values ?? emptyDraftValues());
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const clearCreateDraft = useFormDraft(draftKey, { clientId, values }, {
+    isEmpty: (draft) => !draft.clientId && draft.values.lineItems.every((item) => !item.description.trim() && !item.unitPrice.trim()),
+  });
 
   const patchValues = (patch: Partial<InvoiceDraftValues>) => {
     setValues((prev) => ({ ...prev, ...patch }));
   };
 
   const prefillFromClient = (client: InvoiceClientOption, companySettings: CompanySettings | null) => {
+    const savingsAccount = companySettings?.paymentAccounts?.find((account) => account.accountType === "savings" && account.isActive);
+
     setClientId(client.id);
-    const next = emptyDraftValues(companySettings);
-    next.clientType = client.clientType ?? "new";
-    next.billToName = client.contactPerson || client.contact || client.clientName || "";
-    next.billToCompany = client.companyName || client.company;
-    next.billToLine1 = client.billingAddress ?? "";
-    next.billToCity = client.city ?? "";
-    next.billToPostal = client.postalCode ?? "";
-    next.bankName = companySettings?.defaultBankName || "";
-    next.accountName = companySettings?.defaultAccountName || "";
-    next.accountNumber = companySettings?.defaultAccountNumber || "";
-    setValues(next);
+    setValues((prev) => ({
+      ...prev,
+      clientType: client.clientType ?? "new",
+      billToName: client.contactPerson || client.contact || client.clientName || "",
+      billToCompany: client.companyName || client.company,
+      billToLine1: client.billingAddress ?? "",
+      billToCity: client.city ?? "",
+      billToPostal: client.postalCode ?? "",
+      bankName: savingsAccount?.bankName || companySettings?.defaultBankName || prev.bankName,
+      accountName: savingsAccount?.accountName || companySettings?.defaultAccountName || prev.accountName,
+      accountNumber: savingsAccount?.accountNumber || companySettings?.defaultAccountNumber || prev.accountNumber,
+      paymentAccountType: savingsAccount ? "savings" : null,
+      paymentAccounts: companySettings?.paymentAccounts?.filter((account) => account.isActive) ?? prev.paymentAccounts,
+      termsAndConditions: companySettings?.termsAndConditions ?? prev.termsAndConditions,
+      companyName: companySettings?.companyName ?? prev.companyName,
+      companyPhone: companySettings?.companyPhone ?? prev.companyPhone,
+      companyEmail: companySettings?.companyEmail ?? prev.companyEmail,
+      companyWebsite: companySettings?.companyWebsite ?? prev.companyWebsite,
+    }));
   };
 
   useEffect(() => {
@@ -177,7 +197,9 @@ export function InvoiceCreate({ initialLeadId, initialClientId }: { initialLeadI
           setSettings(companySettings);
         }
 
-        if (initialId) {
+        if (restoredDraft) {
+          setSettings(companySettings);
+        } else if (initialId) {
           const selected = list.find((client) => client.id === initialId);
           if (selected) prefillFromClient(selected, companySettings);
           else setValues(emptyDraftValues(companySettings));
@@ -227,11 +249,20 @@ export function InvoiceCreate({ initialLeadId, initialClientId }: { initialLeadI
       const result = await response.json() as { invoice?: Invoice; error?: string };
       if (!response.ok || !result.invoice) throw new Error(result.error ?? "Unable to create invoice.");
       notifyCrmDataChanged("invoices", "notifications");
+      clearCreateDraft();
       router.push(`/invoices/${result.invoice.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to create invoice.");
       setSaving(false);
     }
+  };
+
+  const cancelCreate = () => {
+    if (!window.confirm("Cancel this invoice? All entered data will be cleared.")) return;
+    setClientId("");
+    setValues(emptyDraftValues(settings));
+    clearCreateDraft();
+    router.push("/invoices");
   };
 
   return (
@@ -242,20 +273,27 @@ export function InvoiceCreate({ initialLeadId, initialClientId }: { initialLeadI
           <h2 style={{ fontSize: 18, fontWeight: 700, color: "#111111", marginTop: 8 }}>New Invoice</h2>
         </div>
         <div className="flex justify-end gap-2">
-          <Link href="/invoices" className="rounded-lg px-4 font-semibold" style={{ height: 36, display: "inline-flex", alignItems: "center", fontSize: 13, color: "#6B7280", border: "1px solid #E5E7EB", textDecoration: "none" }}>
+          <button
+            type="button"
+            onClick={cancelCreate}
+            className="rounded-lg px-4 font-semibold"
+            style={{ height: 36, fontSize: 13, color: "#6B7280", border: "1px solid #E5E7EB", background: "#FFFFFF", cursor: "pointer" }}
+          >
             Cancel
-          </Link>
+          </button>
           <button
             type="button"
             disabled={!clientId || saving || loading}
             onClick={() => void create()}
             className="rounded-lg px-4 font-semibold"
-            style={{ height: 36, fontSize: 13, background: "#2FBEB3", color: "#FFFFFF", border: "none", opacity: !clientId || saving || loading ? 0.6 : 1 }}
+            style={{ height: 36, fontSize: 13, background: "#2FBEB3", color: "#FFFFFF", border: "none", opacity: !clientId || saving || loading ? 0.6 : 1, cursor: "pointer" }}
           >
-            {saving ? "Creating…" : "Create draft"}
+            {saving ? "Processing" : "Create draft"}
           </button>
         </div>
       </div>
+
+      {error && <p role="alert" style={{ fontSize: 12, color: "#DC2626", margin: 0 }}>{error}</p>}
 
       {loading ? (
         <p style={{ fontSize: 13, color: "#6B7280" }}>Loading invoice clients…</p>
@@ -285,7 +323,6 @@ export function InvoiceCreate({ initialLeadId, initialClientId }: { initialLeadI
               </Field>
             )}
           />
-          {error && <p role="alert" style={{ fontSize: 12, color: "#DC2626" }}>{error}</p>}
         </>
       )}
     </div>
@@ -293,12 +330,19 @@ export function InvoiceCreate({ initialLeadId, initialClientId }: { initialLeadI
 }
 
 export function InvoiceDetail({ invoiceId }: { invoiceId: string }) {
+  const draftKey = `invoice:${invoiceId}`;
+  const [restoredDraft] = useState(() => readDraft<InvoiceDraftValues>(draftKey));
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [values, setValues] = useState<InvoiceDraftValues>(() => emptyDraftValues());
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [clickedAction, setClickedAction] = useState<"paid" | "record" | null>(null);
+  const [processingAction, setProcessingAction] = useState<"save" | "issue" | "record" | "paid" | "void" | "preview" | null>(null);
+  const clearInvoiceDraft = useFormDraft(invoice?.status === "draft" ? draftKey : null, values, {
+    isEmpty: () => false,
+  });
 
   const patchValues = (patch: Partial<InvoiceDraftValues>) => {
     setValues((prev) => ({ ...prev, ...patch }));
@@ -313,9 +357,10 @@ export function InvoiceDetail({ invoiceId }: { invoiceId: string }) {
       companyWebsite?: string;
       paymentAccounts?: CompanySettings["paymentAccounts"];
     } = {},
+    restoreDraft = true,
   ) => {
     setInvoice(data);
-    setValues({
+    const serverValues: InvoiceDraftValues = {
       invoiceNumber: data.invoiceNumber,
       clientType: data.clientType,
       invoiceDate: data.invoiceDate,
@@ -344,7 +389,8 @@ export function InvoiceDetail({ invoiceId }: { invoiceId: string }) {
       companyPhone: company.companyPhone ?? "+94 76 567 2814",
       companyEmail: company.companyEmail ?? "info@doclinkcare.com",
       companyWebsite: company.companyWebsite ?? "doclinkcare.com",
-    });
+    };
+    setValues(data.status === "draft" && restoreDraft && restoredDraft ? restoredDraft : serverValues);
   };
 
   const load = async () => {
@@ -408,6 +454,7 @@ export function InvoiceDetail({ invoiceId }: { invoiceId: string }) {
   });
 
   const saveDraft = async () => {
+    setProcessingAction("save");
     setSaving(true);
     setError("");
     setMessage("");
@@ -421,17 +468,20 @@ export function InvoiceDetail({ invoiceId }: { invoiceId: string }) {
       });
       const result = await response.json() as { invoice?: Invoice; error?: string };
       if (!response.ok || !result.invoice) throw new Error(result.error ?? "Unable to save invoice.");
-      applyInvoice(result.invoice, { companyName: values.companyName });
+      applyInvoice(result.invoice, { companyName: values.companyName }, false);
       setMessage("Draft saved.");
+      clearInvoiceDraft();
       notifyCrmDataChanged("invoices", "notifications");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to save invoice.");
     } finally {
       setSaving(false);
+      setProcessingAction(null);
     }
   };
 
   const issue = async () => {
+    setProcessingAction("issue");
     setSaving(true);
     setError("");
     try {
@@ -451,18 +501,26 @@ export function InvoiceDetail({ invoiceId }: { invoiceId: string }) {
       const response = await fetch(`/api/invoices/${invoiceId}/issue`, { method: "POST" });
       const result = await response.json() as { invoice?: Invoice; error?: string };
       if (!response.ok || !result.invoice) throw new Error(result.error ?? "Unable to issue invoice.");
-      applyInvoice(result.invoice, { companyName: values.companyName });
+      applyInvoice(result.invoice, { companyName: values.companyName }, false);
       setMessage(`Issued as ${result.invoice.invoiceNumber}.`);
+      clearInvoiceDraft();
       notifyCrmDataChanged("invoices", "notifications");
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to issue invoice.");
     } finally {
       setSaving(false);
+      setProcessingAction(null);
     }
   };
 
   const setStatus = async (status: "paid" | "void") => {
+    if (status === "paid") {
+      setClickedAction("paid");
+      setProcessingAction("paid");
+    } else {
+      setProcessingAction("void");
+    }
     setSaving(true);
     setError("");
     try {
@@ -476,23 +534,32 @@ export function InvoiceDetail({ invoiceId }: { invoiceId: string }) {
       applyInvoice(result.invoice, { companyName: values.companyName });
       setMessage(status === "paid" ? "Marked as paid." : "Invoice voided.");
       notifyCrmDataChanged("invoices", "notifications");
+      if (status === "paid") window.setTimeout(() => setClickedAction(null), 1800);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to update status.");
+      setClickedAction(null);
     } finally {
       setSaving(false);
+      setProcessingAction(null);
     }
   };
 
   const recordPayment = async () => {
     const amountRaw = window.prompt("Payment amount (LKR)");
-    if (amountRaw == null) return;
+    if (amountRaw == null) {
+      return;
+    }
     const amount = Number(amountRaw);
     if (!Number.isFinite(amount) || amount <= 0) {
       setError("Enter a payment amount greater than zero.");
       return;
     }
     const paymentDate = window.prompt("Payment date (YYYY-MM-DD)", new Date().toISOString().slice(0, 10));
-    if (!paymentDate) return;
+    if (!paymentDate) {
+      return;
+    }
+    setClickedAction("record");
+    setProcessingAction("record");
     setSaving(true);
     setError("");
     setMessage("");
@@ -511,10 +578,13 @@ export function InvoiceDetail({ invoiceId }: { invoiceId: string }) {
         : "Payment recorded on or before the due date.");
       notifyCrmDataChanged("invoices", "notifications");
       await load();
+      window.setTimeout(() => setClickedAction(null), 1800);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to record payment.");
+      setClickedAction(null);
     } finally {
       setSaving(false);
+      setProcessingAction(null);
     }
   };
 
@@ -545,39 +615,53 @@ export function InvoiceDetail({ invoiceId }: { invoiceId: string }) {
               href={`/api/invoices/${invoice.id}/pdf`}
               target="_blank"
               rel="noreferrer"
+              onClick={() => {
+                setProcessingAction("preview");
+                window.setTimeout(() => setProcessingAction(null), 900);
+              }}
               className="rounded-lg px-3 font-semibold"
-              style={{ height: 36, display: "inline-flex", alignItems: "center", fontSize: 12, background: "#E3F7F5", color: "#0E7A70", textDecoration: "none", border: "1px solid #A7F3D0" }}
+              style={{ height: 36, display: "inline-flex", alignItems: "center", fontSize: 12, background: "#E3F7F5", color: "#0E7A70", textDecoration: "none", border: "1px solid #A7F3D0", cursor: "pointer" }}
             >
-              {invoice.status === "draft" ? "Preview PDF" : "Download PDF"}
+              {invoice.status === "draft"
+                ? processingAction === "preview" ? "Processing" : "Preview PDF"
+                : "Download PDF"}
             </a>
           )}
           {invoice.status === "draft" && (
             <>
-              <button type="button" disabled={saving} onClick={() => void saveDraft()} className="rounded-lg px-3 font-semibold" style={{ height: 36, fontSize: 12, background: "#F3F4F6", color: "#374151", border: "none" }}>
-                Save draft
+              <button type="button" disabled={saving} onClick={() => void saveDraft()} className="rounded-lg px-3 font-semibold" style={{ height: 36, fontSize: 12, background: "#F3F4F6", color: "#374151", border: "none", cursor: "pointer" }}>
+                {processingAction === "save" ? "Processing" : "Save draft"}
               </button>
-              <button type="button" disabled={saving} onClick={() => void issue()} className="rounded-lg px-3 font-semibold" style={{ height: 36, fontSize: 12, background: "#2FBEB3", color: "#FFFFFF", border: "none" }}>
-                Issue invoice
+              <button type="button" disabled={saving} onClick={() => void issue()} className="rounded-lg px-3 font-semibold" style={{ height: 36, fontSize: 12, background: "#2FBEB3", color: "#FFFFFF", border: "none", cursor: "pointer" }}>
+                {processingAction === "issue" ? "Processing" : "Issue invoice"}
               </button>
             </>
           )}
           {((invoice.status === "sent" || invoice.status === "issued") || invoice.status === "part_paid") && (
             <>
-              <button type="button" disabled={saving} onClick={() => void recordPayment()} className="rounded-lg px-3 font-semibold" style={{ height: 36, fontSize: 12, background: "#0E7A70", color: "#FFFFFF", border: "none" }}>
-                Record payment
+              <button type="button" disabled={saving} onClick={() => void recordPayment()} className="rounded-lg px-3 font-semibold" style={{ height: 36, fontSize: 12, background: clickedAction === "record" ? "#075E54" : "#0E7A70", color: "#FFFFFF", border: "none", boxShadow: clickedAction === "record" ? "0 0 0 3px #A7F3D0" : "none", transform: clickedAction === "record" ? "scale(0.98)" : "none", cursor: "pointer" }}>
+                {processingAction === "record"
+                  ? "Processing"
+                  : clickedAction === "record"
+                    ? "✓ Payment recorded"
+                  : invoice.status === "part_paid"
+                    ? "Record partial payment"
+                    : "Record payment"}
               </button>
-              <button type="button" disabled={saving} onClick={() => void setStatus("paid")} className="rounded-lg px-3 font-semibold" style={{ height: 36, fontSize: 12, background: "#16A34A", color: "#FFFFFF", border: "none" }}>
-                Mark paid
+              <button type="button" disabled={saving} onClick={() => void setStatus("paid")} className="rounded-lg px-3 font-semibold" style={{ height: 36, fontSize: 12, background: clickedAction === "paid" ? "#166534" : "#16A34A", color: "#FFFFFF", border: "none", boxShadow: clickedAction === "paid" ? "0 0 0 3px #BBF7D0" : "none", transform: clickedAction === "paid" ? "scale(0.98)" : "none", cursor: "pointer" }}>
+                {processingAction === "paid" ? "Processing" : clickedAction === "paid" ? "✓ Marked paid" : "Mark paid"}
               </button>
             </>
           )}
           {(invoice.status === "draft" || invoice.status === "sent" || invoice.status === "issued" || invoice.status === "part_paid") && (
-            <button type="button" disabled={saving} onClick={() => void setStatus("void")} className="rounded-lg px-3 font-semibold" style={{ height: 36, fontSize: 12, background: "#FEE2E2", color: "#B91C1C", border: "none" }}>
-              Void
+            <button type="button" disabled={saving} onClick={() => void setStatus("void")} className="rounded-lg px-3 font-semibold" style={{ height: 36, fontSize: 12, background: "#FEE2E2", color: "#B91C1C", border: "none", cursor: "pointer" }}>
+              {processingAction === "void" ? "Processing" : "Void"}
             </button>
           )}
         </div>
       </div>
+
+      {error && <p role="alert" style={{ fontSize: 12, color: "#DC2626", margin: 0 }}>{error}</p>}
 
       <InvoiceDraftTemplate
         values={values}
@@ -585,7 +669,6 @@ export function InvoiceDetail({ invoiceId }: { invoiceId: string }) {
         readOnly={readOnly}
       />
 
-      {error && <p role="alert" style={{ fontSize: 12, color: "#DC2626" }}>{error}</p>}
       {message && <p style={{ fontSize: 12, color: "#16A34A" }}>{message}</p>}
     </div>
   );

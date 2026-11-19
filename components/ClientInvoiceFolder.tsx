@@ -8,14 +8,26 @@ import {
   formatDaysLateLabel,
   formatMoney,
 } from "@/lib/invoice-format";
+import { isRequiredClientField, isValidClientPhone, REQUIRED_CLIENT_FIELDS } from "@/lib/client-form-validation";
 
 type FolderData = {
   client: {
     id: string;
+    clientName: string;
     company: string;
+    companyName: string;
     contact: string | null;
+    contactPerson: string | null;
+    email: string | null;
+    phone: string | null;
+    billingAddress: string | null;
+    city: string | null;
+    country: string | null;
+    postalCode: string | null;
+    notes: string | null;
     clientType?: "new" | "existing";
     billingType?: string;
+    updatedAt?: string;
     recurringConfig?: {
       id: string;
       billingDay: number;
@@ -37,6 +49,7 @@ type FolderData = {
     outstanding: string;
     currency: string;
     displayStatus: string;
+    tableStatus?: string;
     daysLate: number;
   }>;
 };
@@ -50,6 +63,7 @@ const STATUS_STYLE: Record<string, { bg: string; color: string }> = {
   void: { bg: "#F3F4F6", color: "#6B7280" },
   overdue: { bg: "#FEE2E2", color: "#B91C1C" },
   due_soon: { bg: "#FEF3C7", color: "#B45309" },
+  dismiss: { bg: "#F3F4F6", color: "#4B5563" },
 };
 
 function StatusBadge({ status }: { status: string }) {
@@ -72,6 +86,9 @@ export function ClientInvoiceFolder({ clientId, leadId }: { clientId?: string; l
   const [recurringSaving, setRecurringSaving] = useState(false);
   const [lateFeeInvoiceId, setLateFeeInvoiceId] = useState<string | null>(null);
   const [clientTypeSaving, setClientTypeSaving] = useState(false);
+  const [clientDetailsSaving, setClientDetailsSaving] = useState(false);
+  const [editingClientDetails, setEditingClientDetails] = useState(false);
+  const [clientDetailErrors, setClientDetailErrors] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
     const params = new URLSearchParams();
@@ -134,6 +151,62 @@ export function ClientInvoiceFolder({ clientId, leadId }: { clientId?: string; l
       setActionError(err instanceof Error ? err.message : "Unable to update client type.");
     } finally {
       setClientTypeSaving(false);
+    }
+  };
+
+  const saveClientDetails = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const values = {
+      clientName: String(form.get("clientName") ?? "").trim(),
+      companyName: String(form.get("companyName") ?? "").trim(),
+      phone: String(form.get("phone") ?? "").trim(),
+      billingAddress: String(form.get("billingAddress") ?? "").trim(),
+      city: String(form.get("city") ?? "").trim(),
+    };
+    const errors: Record<string, string> = {};
+    for (const field of REQUIRED_CLIENT_FIELDS) {
+      if (!values[field]) errors[field] = "This field is required.";
+    }
+    if (values.phone && !isValidClientPhone(values.phone)) {
+      errors.phone = "Enter a valid Sri Lankan or international phone number.";
+    }
+    if (Object.keys(errors).length > 0) {
+      setClientDetailErrors(errors);
+      return;
+    }
+
+    setClientDetailsSaving(true);
+    setActionError("");
+    setMessage("");
+    setClientDetailErrors({});
+    try {
+      const response = await fetch(`/api/invoices/clients/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientName: values.clientName,
+          companyName: values.companyName,
+          contactPerson: String(form.get("contactPerson") ?? "").trim() || null,
+          email: String(form.get("email") ?? "").trim() || null,
+          phone: values.phone,
+          billingAddress: values.billingAddress,
+          city: values.city,
+          country: String(form.get("country") ?? "").trim() || null,
+          postalCode: String(form.get("postalCode") ?? "").trim() || null,
+          billingType: String(form.get("billingType") ?? ""),
+          notes: String(form.get("notes") ?? "").trim() || null,
+        }),
+      });
+      const result = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(result.error ?? "Unable to update client details.");
+      setMessage("Client details updated.");
+      setEditingClientDetails(false);
+      await load();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Unable to update client details.");
+    } finally {
+      setClientDetailsSaving(false);
     }
   };
 
@@ -200,6 +273,96 @@ export function ClientInvoiceFolder({ clientId, leadId }: { clientId?: string; l
         ))}
       </div>
 
+      {editingClientDetails ? (
+        <form
+          key={data.client.updatedAt ?? data.client.id}
+          onSubmit={(event) => void saveClientDetails(event)}
+          className="rounded-xl p-4 grid gap-3"
+          style={{ background: "#FFFFFF", border: "1px solid #E3E7EF", gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}
+        >
+          <strong style={{ gridColumn: "1 / -1", fontSize: 14 }}>Service request form</strong>
+          {([
+            ["clientName", "Client name", data.client.clientName ?? ""],
+            ["companyName", "Company name", data.client.companyName ?? data.client.company],
+            ["contactPerson", "Contact person", data.client.contactPerson ?? data.client.contact ?? ""],
+            ["email", "Email", data.client.email ?? ""],
+            ["phone", "Phone", data.client.phone ?? ""],
+            ["billingAddress", "Billing address", data.client.billingAddress ?? ""],
+            ["city", "City", data.client.city ?? ""],
+            ["country", "Country", data.client.country ?? ""],
+            ["postalCode", "Postal code", data.client.postalCode ?? ""],
+          ] as const).map(([name, label, value]) => (
+            <label key={name} style={{ fontSize: 12, color: "#6B7280" }}>
+              {label}{isRequiredClientField(name) && <span style={{ color: "#DC2626" }}> *</span>}
+              <input
+                name={name}
+                defaultValue={value}
+                aria-invalid={Boolean(clientDetailErrors[name])}
+                style={{ display: "block", width: "100%", height: 36, marginTop: 5, border: `1px solid ${clientDetailErrors[name] ? "#DC2626" : "#E3E7EF"}`, borderRadius: 8, padding: "0 10px" }}
+              />
+              {clientDetailErrors[name] && <span style={{ display: "block", marginTop: 4, color: "#DC2626" }}>{clientDetailErrors[name]}</span>}
+            </label>
+          ))}
+          <label style={{ fontSize: 12, color: "#6B7280" }}>
+            Billing type
+            <select
+              name="billingType"
+              defaultValue={data.client.billingType ?? "one_time_development"}
+              style={{ display: "block", width: "100%", height: 36, marginTop: 5, border: "1px solid #E3E7EF", borderRadius: 8, padding: "0 10px" }}
+            >
+              <option value="one_time_development">One-time Development</option>
+              <option value="monthly_retainer">Monthly Retainer</option>
+              <option value="both">Both</option>
+            </select>
+          </label>
+          <label style={{ fontSize: 12, color: "#6B7280", gridColumn: "1 / -1" }}>
+            Notes
+            <textarea
+              name="notes"
+              defaultValue={data.client.notes ?? ""}
+              rows={3}
+              style={{ display: "block", width: "100%", marginTop: 5, border: "1px solid #E3E7EF", borderRadius: 8, padding: 10 }}
+            />
+          </label>
+          <div className="flex gap-2">
+            <button
+              type="submit"
+              disabled={clientDetailsSaving}
+              className="rounded-lg px-4 font-semibold"
+              style={{ height: 36, background: "#0E7A70", color: "#FFFFFF", border: "none" }}
+            >
+              {clientDetailsSaving ? "Saving…" : "Save details"}
+            </button>
+            <button
+              type="button"
+              disabled={clientDetailsSaving}
+              onClick={() => setEditingClientDetails(false)}
+              className="rounded-lg px-4 font-semibold"
+              style={{ height: 36, background: "#FFFFFF", color: "#374151", border: "1px solid #E3E7EF" }}
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      ) : (
+        <div
+          className="rounded-xl px-4 py-3 flex items-center justify-between"
+          style={{ background: "#FFFFFF", border: "1px solid #E3E7EF" }}
+        >
+          <strong style={{ fontSize: 14 }}>Client form</strong>
+          <button
+            type="button"
+            aria-label="Edit service request form"
+            title="Edit service request form"
+            onClick={() => setEditingClientDetails(true)}
+            className="rounded-lg flex items-center justify-center"
+            style={{ width: 32, height: 32, background: "#E3F7F5", color: "#0E7A70", border: "none", fontSize: 18 }}
+          >
+            ✎
+          </button>
+        </div>
+      )}
+
       <div className="rounded-xl p-4 flex items-center gap-4 flex-wrap" style={{ background: "#FFFFFF", border: "1px solid #E3E7EF" }}>
         <strong>Client type</strong>
         <select
@@ -224,15 +387,17 @@ export function ClientInvoiceFolder({ clientId, leadId }: { clientId?: string; l
         </label>
         <label style={{ fontSize: 13 }}>
           Billing day
-          <input
-            type="number"
-            min={1}
-            max={28}
+          <select
             value={recurring?.billingDay ?? 1}
             disabled={recurringSaving}
             onChange={(e) => void saveRecurring({ billingDay: Number(e.target.value), status: recurring?.status ?? "active" })}
-            style={{ width: 70, height: 32, marginLeft: 8, border: "1px solid #E3E7EF", borderRadius: 6, padding: "0 8px" }}
-          />
+            className="rounded-lg px-2"
+            style={{ width: 70, height: 32, marginLeft: 8, border: "1px solid #E3E7EF", borderRadius: 6 }}
+          >
+            {Array.from({ length: 31 }, (_, index) => index + 1).map((day) => (
+              <option key={day} value={day}>{day}</option>
+            ))}
+          </select>
         </label>
       </div>
 
@@ -278,7 +443,7 @@ export function ClientInvoiceFolder({ clientId, leadId }: { clientId?: string; l
                   <td style={{ padding: 12 }}>{formatMoney(invoice.total, invoice.currency)}</td>
                   <td style={{ padding: 12 }}>{invoice.dueDate}</td>
                   <td style={{ padding: 12 }}>{formatMoney(invoice.amountPaid, invoice.currency)}</td>
-                  <td style={{ padding: 12 }}><StatusBadge status={invoice.displayStatus} /></td>
+                  <td style={{ padding: 12 }}><StatusBadge status={invoice.tableStatus ?? invoice.displayStatus} /></td>
                   <td style={{ padding: 12, color: invoice.displayStatus === "overdue" ? "#B91C1C" : "#374151" }}>
                     {formatDaysLateLabel(invoice.daysLate, invoice.displayStatus)}
                   </td>

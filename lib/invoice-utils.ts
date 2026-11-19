@@ -149,6 +149,9 @@ export function serializeInvoice(invoice: {
     invoiceNumber: invoice.invoiceNumber,
     status: invoice.status,
     displayStatus,
+    tableStatus: invoice.reminderDismissedAt && (invoice.status === "sent" || invoice.status === "part_paid")
+      ? "dismiss"
+      : displayStatus,
     clientType: invoice.clientType,
     invoiceType: billingTypeLabel(invoice.invoiceType),
     invoiceTypeValue: invoice.invoiceType,

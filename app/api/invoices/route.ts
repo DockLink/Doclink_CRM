@@ -72,19 +72,18 @@ export async function GET(request: Request) {
   soon.setUTCDate(soon.getUTCDate() + 3);
 
   const activeWhere = { ...clientScope, status: { not: "void" as const } };
-  const [draft, sent, partPaid, paid, voided, overdue, dueSoon, totals] = await Promise.all([
+  const [draft, sent, partPaid, paid, voided, openOutstanding, totals] = await Promise.all([
     prisma.invoice.count({ where: { ...clientScope, status: "draft" } }),
     prisma.invoice.count({ where: { ...clientScope, status: "sent" } }),
     prisma.invoice.count({ where: { ...clientScope, status: "part_paid" } }),
     prisma.invoice.count({ where: { ...clientScope, status: "paid" } }),
     prisma.invoice.count({ where: { ...clientScope, status: "void" } }),
-    prisma.invoice.count({ where: { ...clientScope, status: { in: ["sent", "part_paid"] }, dueDate: { lt: todayUtc } } }),
-    prisma.invoice.count({
+    prisma.invoice.findMany({
       where: {
         ...clientScope,
         status: { in: ["sent", "part_paid"] },
-        dueDate: { gte: todayUtc, lte: soon },
       },
+      select: { dueDate: true, total: true, amountPaid: true },
     }),
     prisma.invoice.aggregate({
       where: activeWhere,
@@ -92,6 +91,14 @@ export async function GET(request: Request) {
     }),
   ]);
 
+  const openOutstandingInvoices = openOutstanding.filter(
+    (invoice) => toNumber(invoice.total) > toNumber(invoice.amountPaid),
+  );
+  const overdue = openOutstandingInvoices.filter((invoice) => invoice.dueDate < todayUtc).length;
+  const dueSoon = openOutstandingInvoices.filter((invoice) => {
+    const due = invoice.dueDate;
+    return due >= todayUtc && due <= soon;
+  }).length;
   const totalInvoiced = toNumber(totals._sum.total);
   const totalPaid = toNumber(totals._sum.amountPaid);
 

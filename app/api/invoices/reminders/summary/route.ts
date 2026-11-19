@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { checkRateLimit, requireProfile, requireInvoiceAccess } from "@/lib/api-auth";
-import { REMINDER_DAYS, serializeInvoice } from "@/lib/invoice-utils";
+import { REMINDER_DAYS, serializeInvoice, toNumber } from "@/lib/invoice-utils";
 
 const invoiceInclude = {
   invoiceClient: {
@@ -60,21 +60,24 @@ export async function GET(request: Request) {
     }),
   ]);
 
-  const overdue = openInvoices.filter((invoice) => invoice.dueDate < todayUtc);
-  const dueToday = openInvoices.filter((invoice) => {
+  const openOutstandingInvoices = openInvoices.filter(
+    (invoice) => toNumber(invoice.total) > toNumber(invoice.amountPaid),
+  );
+  const overdue = openOutstandingInvoices.filter((invoice) => invoice.dueDate < todayUtc);
+  const dueToday = openOutstandingInvoices.filter((invoice) => {
     const due = invoice.dueDate;
     return due.getUTCFullYear() === todayUtc.getUTCFullYear()
       && due.getUTCMonth() === todayUtc.getUTCMonth()
       && due.getUTCDate() === todayUtc.getUTCDate();
   });
-  const dueSoon = openInvoices.filter((invoice) => {
+  const dueSoon = openOutstandingInvoices.filter((invoice) => {
     const due = invoice.dueDate;
     const isToday = due.getUTCFullYear() === todayUtc.getUTCFullYear()
       && due.getUTCMonth() === todayUtc.getUTCMonth()
       && due.getUTCDate() === todayUtc.getUTCDate();
     return !isToday && due > todayUtc && due <= soon;
   });
-  const reminders = openInvoices.filter((invoice) => {
+  const reminders = openOutstandingInvoices.filter((invoice) => {
     const due = invoice.dueDate;
     return due >= todayUtc && due <= soon;
   });
@@ -86,7 +89,7 @@ export async function GET(request: Request) {
     recurringDrafts: recurringDrafts.length,
     reminders: reminders.length,
     unreadNotifications: unreadNotifications.length,
-    total: overdue.length + dueToday.length + dueSoon.length + recurringDrafts.length + unreadNotifications.length,
+    total: overdue.length + dueToday.length + dueSoon.length + recurringDrafts.length,
     notifications: unreadNotifications.map((item) => ({
       id: item.id,
       type: item.type,

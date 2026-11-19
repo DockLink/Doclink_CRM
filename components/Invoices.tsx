@@ -18,11 +18,13 @@ export type InvoiceListItem = {
   invoiceNumber: string | null;
   status: "draft" | "sent" | "issued" | "part_paid" | "paid" | "void";
   displayStatus: string;
+  tableStatus?: string;
   clientType: "new" | "existing";
   invoiceType?: string;
   isMonthlyRetainer?: boolean;
   invoiceDate: string;
   dueDate: string;
+  billingMonth?: string;
   currency: string;
   total: string;
   amountPaid?: string;
@@ -32,7 +34,7 @@ export type InvoiceListItem = {
   billToName: string | null;
   invoiceClientId?: string;
   lead?: { id: string; company: string; contact: string | null };
-  invoiceClient?: { id: string; companyName: string; contactPerson: string | null };
+  invoiceClient?: { id: string; clientName: string; companyName: string; contactPerson: string | null };
   payments?: Array<{
     id: string;
     amount: string;
@@ -93,6 +95,7 @@ const STATUS_STYLE: Record<string, { bg: string; color: string }> = {
   void: { bg: "#F3F4F6", color: "#6B7280" },
   overdue: { bg: "#FEE2E2", color: "#B91C1C" },
   due_soon: { bg: "#FEF3C7", color: "#B45309" },
+  dismiss: { bg: "#F3F4F6", color: "#4B5563" },
 };
 
 function StatusBadge({ status }: { status: string }) {
@@ -115,6 +118,12 @@ function KpiCard({ label, value, accent }: { label: string; value: number; accen
 
 function attentionDetail(item: InvoiceListItem & { attention: string }) {
   const outstanding = formatMoney(item.outstanding ?? item.total, item.currency);
+  const billingMonth = item.billingMonth
+    ? formatBillingMonth(item.billingMonth)
+    : formatBillingMonth(item.invoiceDate);
+  if (item.attention === "Recurring draft") {
+    return `Billing month: ${billingMonth} · New recurring invoice draft generated.`;
+  }
   if (item.attention === "Overdue") {
     const days = item.daysLate ?? calculateDaysOverdue(new Date(`${item.dueDate}T00:00:00.000Z`));
     return `Overdue by ${days} day${days === 1 ? "" : "s"} · ${outstanding} outstanding.`;
@@ -124,7 +133,6 @@ function attentionDetail(item: InvoiceListItem & { attention: string }) {
     if (item.attention === "Due today") return `Due today · ${outstanding} outstanding.`;
     return `Due in ${days} day${days === 1 ? "" : "s"} · ${outstanding} outstanding.`;
   }
-  if (item.attention === "Recurring draft") return "New recurring invoice draft generated.";
   if (item.attention === "Reminder") return `Payment reminder not yet sent · ${outstanding} outstanding.`;
   return outstanding;
 }
@@ -144,6 +152,8 @@ export function Invoices() {
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [processingViewId, setProcessingViewId] = useState<string | null>(null);
+  const [dismissingId, setDismissingId] = useState<string | null>(null);
 
   const setTab = (tab: InvoiceTab) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -225,7 +235,7 @@ export function Invoices() {
     }>();
     for (const invoice of invoices) {
       const client = invoice.invoiceClient
-        ? { id: invoice.invoiceClient.id, company: invoice.invoiceClient.companyName, contact: invoice.invoiceClient.contactPerson }
+        ? { id: invoice.invoiceClient.id, company: invoice.invoiceClient.companyName, contact: invoice.invoiceClient.clientName }
         : invoice.lead;
       if (!client || !invoice.isMonthlyRetainer) continue;
       const current = map.get(client.id) ?? {
@@ -260,13 +270,18 @@ export function Invoices() {
   }, [invoices]);
 
   const dismissReminder = async (id: string) => {
-    await fetch(`/api/invoices/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reminderDismissedAt: new Date().toISOString() }),
-    });
-    notifyCrmDataChanged("invoices", "notifications");
-    void load();
+    setDismissingId(id);
+    try {
+      await fetch(`/api/invoices/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reminderDismissedAt: new Date().toISOString() }),
+      });
+      notifyCrmDataChanged("invoices", "notifications");
+      await load();
+    } finally {
+      setDismissingId(null);
+    }
   };
 
   return (
@@ -296,7 +311,7 @@ export function Invoices() {
         </Link>
       </div>
 
-      <div className="flex gap-1 flex-wrap" style={{ borderBottom: "1px solid #E5E7EB" }}>
+      <div className="invoice-tabs flex gap-1 flex-wrap" style={{ borderBottom: "1px solid #E5E7EB" }}>
         {TABS.map((tab) => {
           const active = activeTab === tab.id;
           return (
@@ -414,8 +429,8 @@ export function Invoices() {
                   <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}><StatusBadge status={item.displayStatus} /> <span style={{ marginLeft: 8 }}>{attentionDetail(item)}</span></div>
                 </div>
                 <div className="flex gap-2">
-                  <button type="button" onClick={() => router.push(`/invoices/${item.id}`)} className="rounded-lg px-3 font-semibold" style={{ height: 30, fontSize: 11, background: "#2FBEB3", color: "#FFFFFF", border: "none" }}>View invoice</button>
-                  <button type="button" onClick={() => void dismissReminder(item.id)} className="rounded-lg px-2.5 font-semibold" style={{ height: 30, fontSize: 11, background: "#F9FAFB", color: "#6B7280", border: "1px solid #E5E7EB" }}>Dismiss</button>
+                  <button type="button" onClick={() => { setProcessingViewId(item.id); router.push(`/invoices/${item.id}`); }} className="rounded-lg px-3 font-semibold" style={{ height: 30, fontSize: 11, background: "#2FBEB3", color: "#FFFFFF", border: "none", cursor: "pointer" }}>{processingViewId === item.id ? "Processing" : "View invoice"}</button>
+                  <button type="button" onClick={() => void dismissReminder(item.id)} className="rounded-lg px-2.5 font-semibold" style={{ height: 30, fontSize: 11, background: "#F9FAFB", color: "#6B7280", border: "1px solid #E5E7EB", cursor: "pointer" }}>{dismissingId === item.id ? "Processing" : "Dismiss"}</button>
                 </div>
               </div>
             ))}
@@ -428,15 +443,15 @@ export function Invoices() {
           <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))" }}>
             <div className="rounded-xl px-4 py-3" style={{ background: "#FFFFFF", border: "1px solid #E3E7EF" }}>
               <p style={{ fontSize: 11, fontWeight: 700, color: "#6B7280", textTransform: "uppercase" }}>Total Invoiced</p>
-              <p style={{ fontSize: 22, fontWeight: 700, marginTop: 4 }}>{formatMoney(kpis.totalInvoiced ?? 0)}</p>
+              <p style={{ fontSize: 16, fontWeight: 700, marginTop: 4 }}>{formatMoney(kpis.totalInvoiced ?? 0)}</p>
             </div>
             <div className="rounded-xl px-4 py-3" style={{ background: "#FFFFFF", border: "1px solid #E3E7EF" }}>
               <p style={{ fontSize: 11, fontWeight: 700, color: "#6B7280", textTransform: "uppercase" }}>Total Paid</p>
-              <p style={{ fontSize: 22, fontWeight: 700, color: "#16A34A", marginTop: 4 }}>{formatMoney(kpis.totalPaid ?? 0)}</p>
+              <p style={{ fontSize: 16, fontWeight: 700, color: "#16A34A", marginTop: 4 }}>{formatMoney(kpis.totalPaid ?? 0)}</p>
             </div>
             <div className="rounded-xl px-4 py-3" style={{ background: "#FFFFFF", border: "1px solid #E3E7EF" }}>
               <p style={{ fontSize: 11, fontWeight: 700, color: "#6B7280", textTransform: "uppercase" }}>Outstanding</p>
-              <p style={{ fontSize: 22, fontWeight: 700, color: "#DC2626", marginTop: 4 }}>{formatMoney(kpis.outstanding ?? 0)}</p>
+              <p style={{ fontSize: 16, fontWeight: 700, color: "#DC2626", marginTop: 4 }}>{formatMoney(kpis.outstanding ?? 0)}</p>
             </div>
             <KpiCard label="Overdue" value={kpis.overdue} accent="#DC2626" />
             <KpiCard label="Draft" value={kpis.draft} accent="#64748B" />
@@ -449,7 +464,7 @@ export function Invoices() {
             <div className="rounded-xl overflow-hidden" style={{ background: "#FFFFFF", border: "1px solid #FECACA" }}>
               <div className="px-4 py-3 flex items-center justify-between" style={{ background: "#FEF2F2", borderBottom: "1px solid #FECACA" }}>
                 <h3 style={{ fontSize: 13, fontWeight: 700, color: "#B91C1C" }}>
-                  Needs attention ({reminders?.total ?? attentionItems.length})
+                  Needs attention ({attentionItems.length})
                 </h3>
               </div>
               <div className="divide-y" style={{ borderColor: "#F3F4F6" }}>
@@ -468,11 +483,11 @@ export function Invoices() {
                     </div>
                     <button
                       type="button"
-                      onClick={() => router.push(`/invoices/${item.id}`)}
+                      onClick={() => { setProcessingViewId(item.id); router.push(`/invoices/${item.id}`); }}
                       className="rounded-lg px-3 font-semibold shrink-0"
-                      style={{ height: 30, fontSize: 11, background: "#2FBEB3", color: "#FFFFFF", border: "none" }}
+                      style={{ height: 30, fontSize: 11, background: "#2FBEB3", color: "#FFFFFF", border: "none", cursor: "pointer" }}
                     >
-                      View invoice
+                      {processingViewId === item.id ? "Processing" : "View invoice"}
                     </button>
                   </div>
                 ))}
@@ -567,7 +582,7 @@ export function Invoices() {
                       {invoice.invoiceType ?? (invoice.clientType === "existing" ? "Monthly Retainer" : "Development")}
                     </td>
                     <td style={{ padding: "12px", fontSize: 12, color: "#6B7280" }}>
-                      {formatBillingMonth(invoice.invoiceDate)}
+                      {formatBillingMonth(invoice.billingMonth ?? invoice.invoiceDate)}
                     </td>
                     <td style={{ padding: "12px", fontSize: 12, color: "#6B7280" }}>{invoice.invoiceDate}</td>
                     <td style={{ padding: "12px", fontSize: 12, color: "#6B7280" }}>{invoice.dueDate}</td>
@@ -581,7 +596,7 @@ export function Invoices() {
                       {formatMoney(invoice.outstanding ?? "0", invoice.currency)}
                     </td>
                     <td style={{ padding: "12px" }}>
-                      <StatusBadge status={invoice.displayStatus} />
+                      <StatusBadge status={invoice.tableStatus ?? invoice.displayStatus} />
                     </td>
                   </tr>
                 ))}

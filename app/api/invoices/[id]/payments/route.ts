@@ -58,6 +58,7 @@ export async function POST(request: Request, { params }: Params) {
 
   const updated = await prisma.$transaction(async (tx) => {
     const daysLate = calculateDaysLate(invoice.dueDate, paymentDate);
+    const fullyPaid = nextPaid >= toNumber(invoice.total);
     await tx.invoicePayment.create({
       data: {
         id: crypto.randomUUID(),
@@ -67,11 +68,10 @@ export async function POST(request: Request, { params }: Params) {
         paymentMethod: body.paymentMethod?.trim() || null,
         referenceNumber: body.referenceNumber?.trim() || null,
         daysLate,
-        notes: body.notes?.trim() || null,
+        notes: body.notes?.trim() || (fullyPaid ? "Payment" : "partial payment"),
         createdById: profile.id,
       },
     });
-    const fullyPaid = nextPaid >= toNumber(invoice.total);
     return tx.invoice.update({
       where: { id },
       data: {

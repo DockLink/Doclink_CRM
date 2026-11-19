@@ -29,7 +29,17 @@ const invoiceInclude = {
 };
 
 function addMonth(date: Date, day: number) {
-  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, day));
+  const year = date.getUTCFullYear();
+  const month = date.getUTCMonth() + 1;
+  const safeDay = Math.min(day, new Date(Date.UTC(year, month + 1, 0)).getUTCDate());
+  return new Date(Date.UTC(year, month, safeDay));
+}
+
+function dateInMonth(date: Date, day: number) {
+  const year = date.getUTCFullYear();
+  const month = date.getUTCMonth();
+  const safeDay = Math.min(day, new Date(Date.UTC(year, month + 1, 0)).getUTCDate());
+  return new Date(Date.UTC(year, month, safeDay));
 }
 
 export async function POST(request: Request) {
@@ -62,13 +72,13 @@ export async function POST(request: Request) {
   for (const config of configs) {
     const client = config.invoiceClient;
     const previous = client.invoices[0];
-    const day = Math.min(Math.max(config.billingDay || 1, 1), 28);
+    const day = Math.min(Math.max(config.billingDay || 1, 1), 31);
 
     let nextDate: Date;
     if (previous) {
       nextDate = addMonth(previous.invoiceDate, day);
     } else {
-      nextDate = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), day));
+      nextDate = dateInMonth(today, day);
       if (nextDate < today) nextDate = addMonth(today, day);
     }
 
