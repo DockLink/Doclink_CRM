@@ -296,9 +296,10 @@ export async function PATCH(
     customValues.push({ customFieldId: field.id, value });
   }
 
+  const touchingFollowUp = "followUpDate" in body || "followUpTime" in body;
   const touchingProposalFollowUp = "proposalFollowUpDate" in body || "proposalFollowUpTime" in body;
 
-  const { lead, proposalActivity } = await prisma.$transaction(async (tx) => {
+  const { lead, proposalActivity, followUpActivity } = await prisma.$transaction(async (tx) => {
     for (const { customFieldId, value } of customValues) {
       await tx.leadCustomFieldValue.upsert({
         where: { leadId_customFieldId: { leadId: id, customFieldId } },
@@ -311,6 +312,8 @@ export async function PATCH(
       data,
       select: {
         proposalSentDate: true,
+        followUpDate: true,
+        followUpTime: true,
         proposalFollowUpDate: true,
         proposalFollowUpTime: true,
       },
@@ -324,12 +327,67 @@ export async function PATCH(
       createdAt: Date;
     } | null = null;
 
+    let scheduledFollowUp: {
+      id: string;
+      outcome: string;
+      notes: string;
+      loggedBy: string;
+      createdAt: Date;
+    } | null = null;
+    if (touchingFollowUp) {
+      const dateStr = dateInput(updated.followUpDate);
+      const timeStr = timeInput(updated.followUpTime);
+      if (dateStr && timeStr) {
+        const notes = formatFollowUpScheduleNote(dateStr, timeStr) ?? `Follow-up scheduled for ${dateStr} at ${timeStr}`;
+        const saved = await tx.activity.create({
+          data: { leadId: id, outcome: "follow_up_scheduled", notes, loggedBy: profile.id },
+          select: {
+            id: true,
+            outcome: true,
+            notes: true,
+            createdAt: true,
+            logger: { select: { name: true } },
+          },
+        });
+        await tx.lead.update({ where: { id }, data: { lastActivityAt: saved.createdAt } });
+        scheduledFollowUp = {
+          id: saved.id,
+          outcome: saved.outcome,
+          notes: saved.notes ?? notes,
+          loggedBy: saved.logger.name,
+          createdAt: saved.createdAt,
+        };
+      }
+    }
+
     // One Proposal Sent activity with date+time only — update in place, drop duplicates.
     if (touchingProposalFollowUp) {
       const dateStr = dateInput(updated.proposalFollowUpDate);
       const timeStr = timeInput(updated.proposalFollowUpTime);
       if (dateStr && timeStr) {
         const notes = formatFollowUpScheduleNote(dateStr, timeStr) ?? `Follow-up scheduled for ${dateStr} at ${timeStr}`;
+        const followUpSaved = await tx.activity.create({
+          data: {
+            leadId: id,
+            outcome: "follow_up_scheduled",
+            notes,
+            loggedBy: profile.id,
+          },
+          select: {
+            id: true,
+            outcome: true,
+            notes: true,
+            createdAt: true,
+            logger: { select: { name: true } },
+          },
+        });
+        scheduledFollowUp = {
+          id: followUpSaved.id,
+          outcome: followUpSaved.outcome,
+          notes: followUpSaved.notes ?? notes,
+          loggedBy: followUpSaved.logger.name,
+          createdAt: followUpSaved.createdAt,
+        };
         const now = new Date();
         const latest = await tx.activity.findFirst({
           where: { leadId: id, outcome: "proposal_sent" },
@@ -382,7 +440,7 @@ export async function PATCH(
       }
     }
 
-    return { lead: updated, proposalActivity: activity };
+    return { lead: updated, proposalActivity: activity, followUpActivity: scheduledFollowUp };
   });
 
   return NextResponse.json({
@@ -397,6 +455,17 @@ export async function PATCH(
             notes: proposalActivity.notes,
             loggedBy: proposalActivity.loggedBy,
             createdAt: proposalActivity.createdAt.toISOString(),
+          },
+        }
+      : {}),
+    ...(followUpActivity
+      ? {
+          followUpActivity: {
+            id: followUpActivity.id,
+            outcome: followUpActivity.outcome,
+            notes: followUpActivity.notes,
+            loggedBy: followUpActivity.loggedBy,
+            createdAt: followUpActivity.createdAt.toISOString(),
           },
         }
       : {}),

@@ -30,6 +30,7 @@ type CallOutcome =
   | "callback_requested"
   | "proposal_discussed"
   | "proposal_sent"
+  | "follow_up_scheduled"
   | "meeting_set"
   | typeof CLOSED_LOST_OUTCOME;
 
@@ -83,6 +84,7 @@ interface LeadPatchResult {
   proposalSentDate?: string | null;
   customFields?: { id: string; value: string }[];
   activity?: { id: string; outcome: string; notes: string; loggedBy: string; createdAt: string };
+  followUpActivity?: { id: string; outcome: string; notes: string; loggedBy: string; createdAt: string };
   error?: string;
 }
 
@@ -122,6 +124,7 @@ const OUTCOME_META: Record<CallOutcome, { label: string; bg: string; color: stri
   callback_requested: { label: "Callback Requested",  bg: "#EDE9FE", color: "#6366F1" },
   proposal_discussed: { label: "Proposal Discussed",  bg: "#EDE9FE", color: "#6366F1" },
   proposal_sent:      { label: "Proposal Sent",       bg: "#EDE9FE", color: "#7C3AED" },
+  follow_up_scheduled:{ label: "Follow-up Scheduled", bg: "#DBEAFE", color: "#2563EB" },
   meeting_set:        { label: "Meeting Set",          bg: "#FEF9C3", color: "#B45309" },
   closed_lost:        { label: "Closed Lost",          bg: "#FEE2E2", color: "#B91C1C" },
 };
@@ -179,7 +182,7 @@ function timestampLabel(iso: string) {
 function buildActivityNotes(userNotes: string, followUpDate: string, followUpTime: string): string {
   const base = userNotes.trim() || "No additional notes.";
   const schedule = formatFollowUpScheduleNote(followUpDate, followUpTime);
-  return schedule ? `${base}\n\n${schedule}` : base;
+  return schedule ? `${base}\n${schedule}` : base;
 }
 
 function toActivityEntry(entry: ApiLeadDetail["activities"][number]): ActivityEntry {
@@ -483,10 +486,25 @@ function DetailsTab({
     setCustomFieldError("");
     onLeadChange((prev) => ({ ...prev, followUpDate, followUpTime }));
     try {
-      await patchLead(lead.id, {
+      const result = await patchLead(lead.id, {
         followUpDate: followUpDate || null,
         followUpTime: followUpTime || null,
       });
+      if (result.followUpActivity) {
+        const entry: ActivityEntry = {
+          id: result.followUpActivity.id,
+          outcome: result.followUpActivity.outcome,
+          notes: result.followUpActivity.notes,
+          loggedBy: result.followUpActivity.loggedBy || "You",
+          timestamp: timestampLabel(result.followUpActivity.createdAt),
+          relativeTime: relativeTime(result.followUpActivity.createdAt),
+        };
+        onLeadChange((prev) => ({
+          ...prev,
+          activity: [entry, ...prev.activity],
+          lastContacted: { outcome: entry.outcome, relativeTime: entry.relativeTime, note: entry.notes },
+        }));
+      }
     } catch (err) {
       onLeadChange((prev) => ({ ...prev, ...previous }));
       setCustomFieldError(err instanceof Error ? err.message : "Unable to save follow-up.");
@@ -530,28 +548,40 @@ function DetailsTab({
         proposalFollowUpTime: proposalFollowUpTime || null,
       });
 
-      // Incomplete schedule (date without time) — fields saved, no activity yet.
-      if (!result.activity) return;
+      const entries: ActivityEntry[] = [];
+      if (result.followUpActivity) {
+        entries.push({
+          id: result.followUpActivity.id,
+          outcome: result.followUpActivity.outcome,
+          notes: result.followUpActivity.notes,
+          loggedBy: result.followUpActivity.loggedBy || "You",
+          timestamp: timestampLabel(result.followUpActivity.createdAt),
+          relativeTime: relativeTime(result.followUpActivity.createdAt),
+        });
+      }
+      if (result.activity) {
+        entries.push({
+          id: result.activity.id,
+          outcome: result.activity.outcome,
+          notes: result.activity.notes,
+          loggedBy: result.activity.loggedBy || "You",
+          timestamp: timestampLabel(result.activity.createdAt),
+          relativeTime: relativeTime(result.activity.createdAt),
+        });
+      }
+      if (entries.length === 0) return;
 
-      const entry: ActivityEntry = {
-        id: result.activity.id,
-        outcome: result.activity.outcome,
-        notes: result.activity.notes,
-        loggedBy: result.activity.loggedBy || "You",
-        timestamp: "Just now",
-        relativeTime: "Just now",
-      };
       onLeadChange((prev) => {
         const withoutProposal = prev.activity.filter((item) => item.outcome !== "proposal_sent");
         return {
           ...prev,
           proposalFollowUpDate,
           proposalFollowUpTime,
-          activity: [entry, ...withoutProposal],
+          activity: [...entries, ...withoutProposal],
           lastContacted: {
-            outcome: "proposal_sent",
-            relativeTime: "Just now",
-            note: entry.notes,
+            outcome: entries[0].outcome,
+            relativeTime: entries[0].relativeTime,
+            note: entries[0].notes,
           },
         };
       });
@@ -803,7 +833,7 @@ function DetailsTab({
                   <OutcomeBadge outcome={lead.lastContacted.outcome} />
                   <span className="shrink-0" style={{ fontSize: 11, color: "#9CA3AF" }}>{lead.lastContacted.relativeTime}</span>
                 </div>
-                <p style={{ fontSize: 13, color: "#374151", lineHeight: 1.6, overflowWrap: "anywhere", wordBreak: "break-word", minWidth: 0 }}>{lead.lastContacted.note}</p>
+                <p style={{ fontSize: 13, color: "#374151", lineHeight: 1.6, whiteSpace: "pre-line", overflowWrap: "anywhere", wordBreak: "break-word", minWidth: 0 }}>{lead.lastContacted.note}</p>
               </div>
             ) : !showLegacyLostReason ? (
               <p style={{ fontSize: 13, color: "#9CA3AF" }}>No calls logged yet.</p>
@@ -886,7 +916,7 @@ function ActivityTab({ lead }: { lead: LeadDetail }) {
                   <OutcomeBadge outcome={entry.outcome} />
                   <span className="shrink-0" style={{ fontSize: 11, color: "#9CA3AF" }}>{entry.relativeTime}</span>
                 </div>
-                <p style={{ fontSize: 13, color: "#374151", lineHeight: 1.65, overflowWrap: "anywhere", wordBreak: "break-word", minWidth: 0 }}>{entry.notes}</p>
+                <p style={{ fontSize: 13, color: "#374151", lineHeight: 1.65, whiteSpace: "pre-line", overflowWrap: "anywhere", wordBreak: "break-word", minWidth: 0 }}>{entry.notes}</p>
                 <p style={{ fontSize: 11, color: "#9CA3AF", overflowWrap: "anywhere", wordBreak: "break-word" }}>Logged by {entry.loggedBy} · {entry.timestamp}</p>
               </div>
             </div>
@@ -1044,9 +1074,12 @@ function FollowUpDateTimeFields({
   const latestLocal = useRef({ date, time });
 
   useEffect(() => {
-    setLocalDate(date);
-    setLocalTime(time);
-    latestLocal.current = { date, time };
+    const timer = window.setTimeout(() => {
+      setLocalDate(date);
+      setLocalTime(time);
+      latestLocal.current = { date, time };
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [date, time]);
 
   useEffect(() => () => {
@@ -1619,6 +1652,7 @@ export function LeadDetailPanel({ role, leadId, initialTab = "details", onClose,
       const result = await response.json().catch(() => ({})) as {
         error?: string;
         activities?: ApiLeadDetail["activities"];
+        proposalSentDate?: string;
       };
       if (!response.ok) {
         setLead(previous);
@@ -1635,6 +1669,13 @@ export function LeadDetailPanel({ role, leadId, initialTab = "details", onClose,
         }) : prev);
       }
       setError("");
+      if (newStage === "Proposal Sent") {
+        setLead((prev) => prev ? {
+          ...prev,
+          proposalSent: true,
+          proposalSentAt: result.proposalSentDate ? timestampLabel(result.proposalSentDate) : "Just now",
+        } : prev);
+      }
       notifyCrmDataChanged("leads", "followups", "dashboard", "notifications");
     } catch {
       setLead(previous);

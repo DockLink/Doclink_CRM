@@ -271,7 +271,7 @@ function UpcomingFollowupsCard({ items }: { items: DashboardFollowUp[] }) {
     <FollowUpSummaryCard
       title={
         <>
-          Upcoming Follow-ups <span style={{ fontWeight: 400, color: "#9CA3AF", fontSize: 12 }}>— next 7 days</span>
+          Upcoming Follow-ups <span style={{ fontWeight: 400, color: "#9CA3AF", fontSize: 12 }}></span>
         </>
       }
       section="upcoming"

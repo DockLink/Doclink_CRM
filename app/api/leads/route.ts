@@ -6,6 +6,7 @@ import { priorityForStage, resolveDisplayFollowUp, type LeadPriority } from "@/l
 import { formatMonthlyRevenue, parseYesNo } from "@/lib/lead-custom-fields";
 import { ensureStandardCustomFields } from "@/lib/standard-custom-fields";
 import { CLOSED_LOST_OUTCOME } from "@/lib/lost-reasons";
+import { isValidClientPhone } from "@/lib/client-form-validation";
 import { Prisma } from "../../../generated/prisma/client";
 
 const priorityValues = new Set(["hot", "warm", "cold"]);
@@ -184,7 +185,16 @@ export async function POST(request: Request) {
     proposalSent?: boolean;
   };
   const company = text(body.company);
+  const niche = text(body.niche);
+  const contact = text(body.contact);
+  const phone = text(body.phone);
   if (!company) return NextResponse.json({ error: "Company name is required" }, { status: 400 });
+  if (!niche) return NextResponse.json({ error: "Niche is required" }, { status: 400 });
+  if (!contact) return NextResponse.json({ error: "Contact name is required" }, { status: 400 });
+  if (!phone) return NextResponse.json({ error: "Phone number is required" }, { status: 400 });
+  if (!isValidClientPhone(phone)) {
+    return NextResponse.json({ error: "Enter a valid local or international phone number" }, { status: 400 });
+  }
 
   const stage = await prisma.pipelineStage.findFirst({
     where: { name: text(body.stage) || "New Lead", isActive: true },
@@ -217,9 +227,9 @@ export async function POST(request: Request) {
   const lead = await prisma.lead.create({
     data: {
       company,
-      niche: text(body.niche) || undefined,
-      contact: text(body.contact) || undefined,
-      phone: text(body.phone) || undefined,
+      niche,
+      contact,
+      phone,
       priority,
       sourceId: source?.id,
       stageId: stage.id,
@@ -243,7 +253,16 @@ export async function PATCH(request: Request) {
     : [];
   if (ids.length === 0) return NextResponse.json({ error: "At least one lead id is required" }, { status: 400 });
 
-  const data: { stageId?: string; assigneeId?: string; stageChangedAt?: Date; lostReason?: string | null; priority?: LeadPriority } = {};
+  const data: {
+    stageId?: string;
+    assigneeId?: string;
+    stageChangedAt?: Date;
+    lostReason?: string | null;
+    priority?: LeadPriority;
+    proposalSent?: boolean;
+    proposalSentDate?: Date;
+  } = {};
+  let proposalSentDate: Date | undefined;
   if (body.stage) {
     const stage = await prisma.pipelineStage.findFirst({ where: { name: text(body.stage), isActive: true } });
     if (!stage) return NextResponse.json({ error: "Selected stage was not found" }, { status: 400 });
@@ -251,6 +270,11 @@ export async function PATCH(request: Request) {
     data.stageChangedAt = new Date();
     data.priority = priorityForStage(stage.name);
     data.lostReason = body.stage === "Closed Lost" ? text(body.lostReason) || null : null;
+    if (stage.name === "Proposal Sent") {
+      proposalSentDate = new Date();
+      data.proposalSent = true;
+      data.proposalSentDate = proposalSentDate;
+    }
   }
   const markingLost = Boolean(data.stageId) && body.stage === "Closed Lost";
   if (body.assigneeName) {
@@ -284,6 +308,7 @@ export async function PATCH(request: Request) {
       loggedBy: profile.name,
       createdAt: activity.createdAt.toISOString(),
     })),
+    ...(proposalSentDate ? { proposalSentDate: proposalSentDate.toISOString() } : {}),
   });
 }
 
